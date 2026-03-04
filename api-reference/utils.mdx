@@ -1,0 +1,135 @@
+---
+title: Utility Functions
+description: Helper functions for contact type detection and document expiry validation
+---
+
+The `app/utils.py` module provides utility functions used throughout the application for validating document expiry and detecting contact information types.
+
+## Functions
+
+### assess_contact_type
+
+Determines the type of contact information (email, link, or other) for a service.
+
+```python
+def assess_contact_type(service_contact_info: str) -> str
+```
+
+<ParamField path="service_contact_info" type="string" required>
+  Service contact information string (email, URL, or plain text)
+</ParamField>
+
+**Returns:** One of `"email"`, `"link"`, or `"other"`
+
+**Implementation:**
+
+```python
+import re
+from notifications_utils.recipient_validation.email_address import EMAIL_REGEX_PATTERN
+
+def assess_contact_type(service_contact_info):
+    if re.search(EMAIL_REGEX_PATTERN, service_contact_info):
+        return "email"
+    if service_contact_info.startswith("http"):
+        return "link"
+    else:
+        return "other"
+```
+
+**Examples:**
+
+```python
+# Email detection
+assess_contact_type("support@example.gov.uk")  # Returns: "email"
+
+# URL detection
+assess_contact_type("https://example.gov.uk/contact")  # Returns: "link"
+
+# Other contact info
+assess_contact_type("Call 0800 123 4567")  # Returns: "other"
+```
+
+**Usage:**
+
+This function is used in view handlers to determine how to render service contact information in templates:
+
+```python
+# From app/main/views/index.py
+service_contact_info = service["data"]["contact_link"]
+contact_info_type = assess_contact_type(service_contact_info)
+
+# contact_info_type is then passed to templates to control rendering
+```
+
+---
+
+### document_has_expired
+
+Checks if a document has passed its expiry date based on the `available_until` timestamp.
+
+```python
+def document_has_expired(available_until: str) -> bool
+```
+
+<ParamField path="available_until" type="string" required>
+  ISO 8601 date string indicating when the document expires
+</ParamField>
+
+**Returns:** `True` if the document expiry date has passed, `False` otherwise
+
+**Implementation:**
+
+```python
+from datetime import date
+from dateutil import parser
+
+def document_has_expired(available_until):
+    file_expiry_date = parser.parse(available_until).date()
+    
+    # if expiry date passed, even if file is still available, we do not return it 
+    # to respect data retention period set by the service
+    if file_expiry_date < date.today():
+        return True
+    
+    return False
+```
+
+**Examples:**
+
+```python
+from datetime import date, timedelta
+
+# Document expired yesterday
+expired_date = (date.today() - timedelta(days=1)).isoformat()
+document_has_expired(expired_date)  # Returns: True
+
+# Document expires tomorrow
+valid_date = (date.today() + timedelta(days=1)).isoformat()
+document_has_expired(valid_date)  # Returns: False
+
+# Document expires today (still valid)
+today = date.today().isoformat()
+document_has_expired(today)  # Returns: False
+```
+
+**Usage:**
+
+This function is used when retrieving document metadata to ensure expired documents are not served:
+
+```python
+# From app/main/views/index.py
+metadata = response.json().get("document")
+
+# Check expiry - abort with 410 Gone if expired
+if metadata is None or (metadata["available_until"] and document_has_expired(metadata["available_until"])):
+    abort(410)
+```
+
+<Note>
+Documents are never served past their expiry date, even if they remain technically available in storage. This respects the data retention period set by the service.
+</Note>
+
+## Related
+
+- [View Functions](/api-reference/views) - Route handlers that use these utilities
+- [Application Routes](/application/routes) - User-facing routes and error handling

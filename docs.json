@@ -85,7 +85,8 @@
               "api-reference/app-init",
               "api-reference/views",
               "api-reference/service-client",
-              "api-reference/config"
+              "api-reference/config",
+              "api-reference/utils"
             ]
           }
         ]
