@@ -1,0 +1,94 @@
+{
+  "projectType": "frontend",
+  "projectName": "Document Download Frontend",
+  "projectDescription": "GOV.UK Notify frontend application for securely downloading documents uploaded via the Document Download API",
+  "theme": "linden",
+  "primaryColor": "#040404",
+  "lightColor": "#d4fb65",
+  "darkColor": "#33183b",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "introduction",
+              "architecture"
+            ]
+          },
+          {
+            "group": "Getting Started",
+            "pages": [
+              "getting-started/installation",
+              "getting-started/development",
+              "getting-started/running-locally"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/environment-variables",
+              "configuration/settings"
+            ]
+          },
+          {
+            "group": "Application",
+            "pages": [
+              "application/routes",
+              "application/templates",
+              "application/forms",
+              "application/api-client"
+            ]
+          },
+          {
+            "group": "Deployment",
+            "pages": [
+              "deployment/docker",
+              "deployment/production"
+            ]
+          },
+          {
+            "group": "Development",
+            "pages": [
+              "development/testing",
+              "development/linting",
+              "development/frontend-assets"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Core Modules",
+            "pages": [
+              "api-reference/app-init",
+              "api-reference/views",
+              "api-reference/service-client",
+              "api-reference/config"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Secure document download landing pages",
+    "Email verification for document access",
+    "GOV.UK Frontend component integration",
+    "Document metadata validation",
+    "Content Security Policy implementation",
+    "Flask-based web application"
+  ],
+  "publicApiSurface": [
+    "/d/<service_id>/<document_id> - Document landing page",
+    "/d/<service_id>/<document_id>/confirm-email-address - Email confirmation",
+    "/d/<service_id>/<document_id>/download - Document download page",
+    "/_status - Health check endpoint",
+    "/services/_status - Services health check",
+    "ServiceApiClient.get_service() - Retrieve service information"
+  ]
+}
