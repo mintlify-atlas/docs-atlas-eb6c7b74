@@ -1,0 +1,451 @@
+---
+title: Architecture Overview
+description: Technical architecture of the Document Download Frontend application
+---
+
+The Document Download Frontend is a Flask-based web application that provides a secure user interface for downloading documents uploaded via the [Document Download API](https://github.com/alphagov/document-download-api). It implements a multi-step verification flow with robust security controls.
+
+## Application Structure
+
+### Flask Application Initialization
+
+The application follows a modular Flask architecture with clear separation of concerns:
+
+```python
+# application.py:20-29
+application = Flask("app")
+
+create_app(application)
+application.wsgi_app = WhiteNoise(application.wsgi_app, STATIC_ROOT, STATIC_URL)
+
+if using_eventlet:
+    application.wsgi_app = EventletTimeoutMiddleware(
+        application.wsgi_app,
+        timeout_seconds=int(os.getenv("HTTP_SERVE_TIMEOUT_SECONDS", 30)),
+    )
+```
+
+The `create_app()` function (app/\_\_init\_\_.py:55-82) orchestrates initialization:
+
+1. **Configuration loading** - Environment-based config (Development, Test, Production)
+2. **URL converters** - Custom `Base64UUIDConverter` for service/document IDs
+3. **Middleware stack** - Metrics, logging, request helpers
+4. **Blueprint registration** - Main blueprint with route handlers
+5. **Error handlers** - Unified error response handling
+
+### Core Components
+
+<CardGroup cols={2}>
+  <Card title="WSGI Middleware" icon="layer-group">
+    - **WhiteNoise**: Static file serving with efficient caching
+    - **EventletTimeoutMiddleware**: Request timeout protection (30s default)
+    - **GDSMetrics**: Request/response metrics collection
+  </Card>
+  
+  <Card title="Security Layer" icon="shield">
+    - **CSP Headers**: Strict Content Security Policy with nonce-based inline scripts
+    - **CSRF Protection**: Flask-WTF CSRF tokens on forms
+    - **HTTP Security Headers**: HSTS, X-Frame-Options, etc.
+  </Card>
+  
+  <Card title="API Clients" icon="plug">
+    - **ServiceApiClient**: Fetches service metadata from Notify API
+    - **Document Download API**: Metadata checks and authentication (via requests library)
+  </Card>
+  
+  <Card title="Template System" icon="file-code">
+    - **Jinja2**: Template rendering with GOV.UK Frontend components
+    - **govuk-frontend-jinja**: GOV.UK Design System integration
+  </Card>
+</CardGroup>
+
+## Request Flow Architecture
+
+The document download process follows a secure multi-step flow:
+
+### 1. Landing Page
+
+```python
+# app/main/views/index.py:52-99
+@main.route("/d/<base64_uuid:service_id>/<base64_uuid:document_id>", methods=["GET"])
+def landing(service_id, document_id):
+    key = request.args.get("key", None)
+    if not key:
+        abort(404)
+    
+    service = _get_service_or_raise_error(service_id)
+    metadata = _get_document_metadata(service_id, document_id, key)
+    
+    if metadata.get("confirm_email", False) is True:
+        continue_url = url_for("main.confirm_email_address", ...)
+    else:
+        continue_url = url_for("main.download_document", ...)
+```
+
+**Purpose**: Initial entry point that validates the document exists and determines if email verification is required.
+
+**Key validations**:
+- Service ID and document ID must be valid UUIDs (base64-encoded)
+- Decryption key must be present in query string
+- Document metadata must be retrievable from API
+- Document must not be expired or deleted (410 Gone)
+
+### 2. Email Verification (Conditional)
+
+```python
+# app/main/views/index.py:102-182
+@main.route("/d/<base64_uuid:service_id>/<base64_uuid:document_id>/confirm-email-address")
+def confirm_email_address(service_id, document_id):
+    form = EmailAddressForm()
+    
+    if form.validate_on_submit():
+        authentication_data = _authenticate_access_to_document(
+            service_id, document_id, key, form.email_address.data
+        )
+        
+        if authentication_data:
+            response = redirect(url_for(".download_document", ...))
+            response.set_cookie(
+                key="document_access_signed_data",
+                value=authentication_data["signed_data"],
+                domain=cookie_domain,
+                httponly=True,
+                secure=True
+            )
+            return response
+```
+
+**Purpose**: Verify the user's email address matches the intended recipient.
+
+**Flow**:
+1. User enters email address
+2. Frontend POSTs to Document Download API `/authenticate` endpoint
+3. API validates email matches recipient
+4. API returns signed authentication data
+5. Frontend sets httponly cookie with signed data
+6. Cookie is scoped to download URL path for minimal exposure
+
+<Note>
+The authentication cookie is set by the frontend but read by the API. It works across subdomains by setting the `domain` attribute to the base domain (e.g., `.gov.uk`).
+</Note>
+
+### 3. Download Page
+
+```python
+# app/main/views/index.py:185-218
+@main.route("/d/<base64_uuid:service_id>/<base64_uuid:document_id>/download")
+def download_document(service_id, document_id):
+    metadata = _get_document_metadata(service_id, document_id, key)
+    
+    return render_template(
+        "views/download.html",
+        download_link=metadata["direct_file_url"],
+        file_size=format_file_size(metadata["size_in_bytes"]),
+        file_type=format_file_type(metadata["file_extension"]),
+        file_expiry_date=_format_file_expiry_date(metadata["available_until"])
+    )
+```
+
+**Purpose**: Display download button with file metadata.
+
+**Key features**:
+- Direct download URL from Document Download API
+- Human-readable file size and type
+- Expiry date display (with day of week if within 30 days)
+- The actual download happens on the Document Download API (not this frontend)
+
+## Security Architecture
+
+### Content Security Policy
+
+The application implements a strict CSP with nonce-based script execution:
+
+```python
+# app/__init__.py:106-134
+def make_nonce_before_request():
+    if not getattr(request, "csp_nonce", None):
+        request.csp_nonce = secrets.token_urlsafe(16)
+
+def useful_headers_after_request(response):
+    response.headers.add(
+        "Content-Security-Policy",
+        (
+            "default-src 'self';"
+            "script-src 'self' 'nonce-{csp_nonce}';"
+            "connect-src 'self';"
+            "object-src 'self';"
+            "font-src 'self' data:;"
+            "img-src 'self' data:;"
+            "style-src 'self' 'nonce-{csp_nonce}';"
+            "frame-ancestors 'self';"
+            "frame-src 'self';".format(csp_nonce=request.csp_nonce)
+        ),
+    )
+```
+
+<Warning>
+Inline scripts and styles are forbidden. All dynamic scripts must use the CSP nonce from `request.csp_nonce`.
+</Warning>
+
+### HTTP Security Headers
+
+The application sets comprehensive security headers on every response (app/\_\_init\_\_.py:112-148):
+
+| Header | Value | Purpose |
+|--------|-------|---------|
+| `X-Robots-Tag` | `noindex, nofollow` | Prevent search engine indexing |
+| `X-Frame-Options` | `DENY` | Prevent clickjacking |
+| `X-Content-Type-Options` | `nosniff` | Prevent MIME sniffing |
+| `Referrer-Policy` | `no-referrer` | Don't leak URLs in referrer |
+| `Cache-Control` | `no-store, no-cache, private` | Prevent document URL caching |
+| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains` | Force HTTPS |
+| `Cross-Origin-Embedder-Policy` | `require-corp` | Isolate resources |
+| `Cross-Origin-Opener-Policy` | `same-origin` | Process isolation |
+| `Permissions-Policy` | Restrictive | Disable browser features |
+
+### CSRF Protection
+
+All forms use Flask-WTF CSRF tokens:
+
+```python
+# app/forms.py:47-53
+class EmailAddressForm(Form):
+    email_address = EmailAddressField(
+        "Email address",
+        validators=[DataRequired("Enter your email address"), ValidEmail()],
+        filters=[strip_all_whitespace],
+    )
+```
+
+CSRF errors are caught and handled gracefully (app/\_\_init\_\_.py:175-179).
+
+## API Integration
+
+### Service API Client
+
+Thread-safe client for fetching service metadata:
+
+```python
+# app/notify_client/service_api_client.py:19-34
+class ServiceApiClient:
+    def __init__(self, app):
+        self.api_client = OnwardsRequestNotificationsAPIClient(
+            "x" * 100,
+            base_url=app.config["API_HOST_NAME"],
+        )
+        self.api_client.service_id = app.config["ADMIN_CLIENT_USER_NAME"]
+        self.api_client.api_key = app.config["ADMIN_CLIENT_SECRET"]
+    
+    def get_service(self, service_id):
+        return self.api_client.get(f"/service/{service_id}")
+```
+
+<Info>
+The client uses context variables (`ContextVar`) for thread-local storage, ensuring safety in concurrent request handling.
+</Info>
+
+### Document Download API Integration
+
+The frontend communicates with two Document Download API endpoints:
+
+**1. Metadata Check** (`/services/{service_id}/documents/{document_id}/check`)
+
+```python
+# app/main/views/index.py:241-273
+def _get_document_metadata(service_id, document_id, key):
+    check_file_url = "{}/services/{}/documents/{}/check?key={}".format(
+        current_app.config["DOCUMENT_DOWNLOAD_API_HOST_NAME_INTERNAL"],
+        service_id, document_id, key
+    )
+    response = requests.get(check_file_url, headers=headers)
+    
+    match response.status_code:
+        case 400:
+            if "decryption key" in error_msg or "Forbidden" in error_msg:
+                abort(404)
+        case 404 | 403:
+            abort(404)
+        case 410:
+            abort(410)
+```
+
+Returns metadata including:
+- `direct_file_url`: Pre-signed download URL
+- `size_in_bytes`: File size
+- `file_extension`: File type
+- `available_until`: Expiry timestamp
+- `confirm_email`: Whether email verification is required
+
+**2. Email Authentication** (`/services/{service_id}/documents/{document_id}/authenticate`)
+
+```python
+# app/main/views/index.py:276-308
+def _authenticate_access_to_document(service_id, document_id, key, email_address):
+    response = requests.post(
+        auth_file_url,
+        json={"key": key, "email_address": email_address},
+        headers=headers,
+    )
+    
+    if response.status_code == 429:
+        raise TooManyRequests
+    elif response.status_code in {400, 403}:
+        return None  # Invalid email
+    
+    data = response.json()
+    cookie_path = parse.urlsplit(data["direct_file_url"]).path
+    
+    return {
+        "signed_data": data["signed_data"],
+        "cookie_path": cookie_path,
+    }
+```
+
+Returns:
+- `signed_data`: Cryptographically signed authentication token
+- `direct_file_url`: Used to extract cookie path scope
+
+## Middleware Stack
+
+### WhiteNoise (Static Files)
+
+```python
+# application.py:23
+application.wsgi_app = WhiteNoise(application.wsgi_app, STATIC_ROOT, STATIC_URL)
+```
+
+Serves compiled frontend assets (CSS, JS, images) with:
+- Efficient caching headers
+- Compression (gzip/brotli)
+- Fingerprinted URLs via `asset_fingerprinter`
+
+### EventletTimeoutMiddleware
+
+```python
+# application.py:26-29
+if using_eventlet:
+    application.wsgi_app = EventletTimeoutMiddleware(
+        application.wsgi_app,
+        timeout_seconds=int(os.getenv("HTTP_SERVE_TIMEOUT_SECONDS", 30)),
+    )
+```
+
+Prevents long-running requests from blocking workers:
+- Configurable timeout (default 30 seconds)
+- Raises `EventletTimeout` exception on timeout
+- Custom error handler returns 504 Gateway Timeout (app/\_\_init\_\_.py:181-184)
+
+<Warning>
+EventletTimeout errors are displayed as generic 500 errors to users for security reasons.
+</Warning>
+
+### GDSMetrics
+
+```python
+# app/__init__.py:66
+metrics.init_app(application)
+```
+
+Collects request/response metrics:
+- Request duration
+- Response status codes
+- Endpoint hit counts
+- Sends to StatsD for monitoring
+
+## Error Handling
+
+Centralized error handling with user-friendly pages (app/\_\_init\_\_.py:151-184):
+
+```python
+@application.errorhandler(410)
+@application.errorhandler(404)
+@application.errorhandler(403)
+@application.errorhandler(401)
+@application.errorhandler(400)
+def handle_http_error(error):
+    return _error_response(error.code)
+
+@application.errorhandler(500)
+@application.errorhandler(Exception)
+def handle_bad_request(error):
+    current_app.logger.exception(error)
+    if current_app.config.get("DEBUG", None):
+        raise error
+    return _error_response(500)
+```
+
+Special error handling for document-specific errors:
+
+```python
+# app/main/views/index.py:66-74
+try:
+    metadata = _get_document_metadata(service_id, document_id, key)
+except (Gone, NotFound) as e:
+    return render_template(
+        "views/file-unavailable.html",
+        status_code=e.code,
+        service_name=service_name,
+        service_contact_info=service_contact_info,
+    ), e.code
+```
+
+<Tip>
+Document not found (404) and expired (410) errors show a custom template with service contact information to help users resolve issues.
+</Tip>
+
+## Configuration Management
+
+Environment-based configuration (app/config.py):
+
+```python
+class Config:
+    # API endpoints
+    API_HOST_NAME = os.environ.get("API_HOST_NAME")
+    DOCUMENT_DOWNLOAD_API_HOST_NAME = os.environ.get("DOCUMENT_DOWNLOAD_API_HOST_NAME")
+    DOCUMENT_DOWNLOAD_API_HOST_NAME_INTERNAL = os.environ.get("DOCUMENT_DOWNLOAD_API_HOST_NAME_INTERNAL")
+    
+    # Security
+    SECRET_KEY = os.environ.get("SECRET_KEY")
+    ADMIN_CLIENT_SECRET = os.environ.get("ADMIN_CLIENT_SECRET")
+    
+    # Environment
+    NOTIFY_ENVIRONMENT = os.environ["NOTIFY_ENVIRONMENT"]
+    HTTP_PROTOCOL = os.environ.get("HTTP_PROTOCOL", "http")
+
+class Development(Config):
+    DEBUG = True
+    SERVER_NAME = os.getenv("SERVER_NAME")
+    DOCUMENT_DOWNLOAD_API_HOST_NAME = "http://localhost:7000"
+
+class Test(Development):
+    TESTING = True
+    WTF_CSRF_ENABLED = False
+```
+
+<Note>
+The application uses two Document Download API URLs: `DOCUMENT_DOWNLOAD_API_HOST_NAME` for redirects and `DOCUMENT_DOWNLOAD_API_HOST_NAME_INTERNAL` for backend API calls. This allows separate internal/external networking.
+</Note>
+
+## Performance Monitoring
+
+Sentry integration for error tracking and performance monitoring (app/performance.py:12-44):
+
+```python
+def init_performance_monitoring():
+    environment = os.getenv("NOTIFY_ENVIRONMENT").lower()
+    sentry_enabled = bool(int(os.getenv("SENTRY_ENABLED", "0")))
+    
+    if environment and sentry_enabled and sentry_dsn:
+        sentry_sdk.init(
+            dsn=sentry_dsn,
+            environment=environment,
+            sample_rate=error_sample_rate,
+            traces_sampler=traces_sampler,
+        )
+```
+
+Features:
+- Configurable error and trace sampling rates
+- PII control via environment variables
+- Git commit-based release tracking
+- Custom trace sampler that respects parent spans

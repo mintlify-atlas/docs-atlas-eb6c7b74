@@ -1,0 +1,430 @@
+---
+title: Templates
+description: Jinja2 templates and GOV.UK Frontend components
+---
+
+## Template Architecture
+
+The Document Download Frontend uses **Jinja2** templating with **GOV.UK Frontend** components to create accessible, government-standard user interfaces.
+
+## Base Template
+
+### Document Download Template
+
+**File:** `app/templates/document_download_template.html`
+
+**Purpose:** Base template extended by all pages
+
+**Extends:** `govuk_frontend_jinja/template.html`
+
+**Key Features:**
+
+```html
+{% extends "govuk_frontend_jinja/template.html" %}
+{% from "components/footer/macro.html" import govukFooterWithoutExternalLinks -%}
+
+{% set cspNonce = request.csp_nonce %}
+```
+
+#### Head Icons
+
+```html
+{% block headIcons %}
+  <link rel="icon" sizes="48x48" href="{{ asset_url('images/favicon.ico') }}">
+  <link rel="icon" sizes="any" href="{{ asset_url('images/favicon.svg') }}" type="image/svg+xml">
+  <link rel="mask-icon" href="{{ asset_url('images/govuk-icon-mask.svg') }}" color="#1d70b8">
+  <link rel="apple-touch-icon" href="{{ asset_url('images/govuk-icon-180.png') }}">
+  <link rel="manifest" href="{{ asset_url('manifest.json') }}">
+{% endblock %}
+```
+
+#### Stylesheets and Meta Tags
+
+```html
+{% block head %}
+  <link rel="stylesheet" media="screen" href="{{ asset_url('stylesheets/main.css') }}" />
+  {% block meta %}
+  <meta name="referrer" content="never">
+  {% endblock %}
+{% endblock %}
+```
+
+**Security:** Sets `referrer` policy to `"never"` to prevent leaking document URLs
+
+#### Page Title
+
+```html
+{% set _per_page_title %}
+  {% block per_page_title %}Document Download{% endblock %}
+{% endset %}
+
+{% block pageTitle %}
+  {{ _per_page_title }} – GOV.UK
+{% endblock %}
+```
+
+#### Header
+
+```html
+{% block govukHeader %}
+  {{ govukHeader({
+    "assetsPath": "/static/images/",
+    "homepageUrl": "https://www.gov.uk"
+  }) }}
+{% endblock %}
+```
+
+#### Content Structure
+
+```html
+{% block content %}
+  <div class="govuk-grid-row">
+    <div class="govuk-grid-column-two-thirds">
+      <h1 class="govuk-heading-l">{{ _per_page_title }}</h1>
+      {% block main_content %}{% endblock %}
+    </div>
+  </div>
+{% endblock %}
+```
+
+All pages use a **two-thirds width column** layout for optimal readability.
+
+#### Footer
+
+```html
+{% block govukFooter %}
+  {{ govukFooterWithoutExternalLinks({
+    "contentLicence": {
+      "text": " All content is available under the Open Government Licence v3.0, except where otherwise stated"
+    }
+  }) }}
+{% endblock %}
+```
+
+**Custom Component:** Uses `govukFooterWithoutExternalLinks` instead of standard footer
+
+#### Scripts
+
+```html
+{% block bodyEnd %}
+  <script type="module" src="{{ asset_url('javascripts/main.js') }}"></script>
+{% endblock %}
+```
+
+## View Templates
+
+### Landing Page
+
+**File:** `app/templates/views/landing.html`
+
+**Route:** `/d/<service_id>/<document_id>`
+
+**Purpose:** Initial page shown when user accesses document link
+
+```html
+{% extends "document_download_template.html" %}
+{%- from "govuk_frontend_jinja/components/button/macro.html" import govukButton -%}
+
+{% block per_page_title %}
+  You have a file to download
+{% endblock %}
+
+{% block main_content %}
+  <p class="govuk-body">{{ service_name or '[SERVICE_NAME]'}} sent you a file to download.</p>
+  <p class="govuk-body govuk-!-margin-bottom-0">
+    {{ govukButton({
+      "href": continue_url,
+      "text": "Continue",
+    }) }}
+  </p>
+  <p class="govuk-body">
+    If you have any questions,
+    {% if contact_info_type == "link" %}
+      <a href="{{ service_contact_info }}" class="govuk-link" rel="noreferrer"> contact {{ service_name }}</a>.
+    {% elif contact_info_type == "email" %}
+      email <a href="mailto:{{ service_contact_info }}" class="govuk-link">{{service_contact_info}}</a>.
+    {% else %}
+      call {{ service_contact_info }}.
+    {% endif %}
+  </p>
+{% endblock %}
+```
+
+**Template Variables:**
+- `service_name`: Name of sending service
+- `continue_url`: Next step URL (email confirmation or download)
+- `service_contact_info`: Support contact
+- `contact_info_type`: `"link"`, `"email"`, or `"phone"`
+
+### Email Confirmation Page
+
+**File:** `app/templates/views/confirm-email-address.html`
+
+**Route:** `/d/<service_id>/<document_id>/confirm-email-address`
+
+**Purpose:** Email verification before allowing download
+
+```html
+{% extends "document_download_template.html" %}
+{%- from "govuk_frontend_jinja/components/button/macro.html" import govukButton -%}
+{%- from "macros/error_summary.html" import render_error_summary -%}
+
+{% block per_page_title %}
+  {% if form.errors %}Error: {% endif %}Confirm your email address
+{% endblock %}
+
+{% block content %}
+  <div class="govuk-grid-row">
+    <div class="govuk-grid-column-two-thirds">
+      {{ render_error_summary(form) }}
+
+      <h1 class="govuk-heading-l">Confirm your email address</h1>
+
+      <p class="govuk-body">
+        For security, we need to confirm the email address the file was sent to before you can download it.
+      </p>
+
+      <form method="post" novalidate>
+        {{ form.csrf_token }}
+        {{ form.email_address }}
+
+        {{ govukButton({
+          "text": "Continue",
+          "type": "submit"
+        }) }}
+      </form>
+
+      <p class="govuk-body">
+        If you have any questions,
+        {% if contact_info_type == "link" %}
+          <a href="{{ service_contact_info }}" class="govuk-link" rel="noreferrer"> contact {{ service_name }}</a>.
+        {% elif contact_info_type == "email" %}
+          email <a href="mailto:{{ service_contact_info }}" class="govuk-link">{{ service_contact_info }}</a>.
+        {% else %}
+          call {{ service_contact_info }}.
+        {% endif %}
+      </p>
+    </div>
+  </div>
+{% endblock %}
+```
+
+**Key Features:**
+- **Error prefix:** Adds `"Error: "` to page title when validation fails
+- **Error summary:** Displays all form errors at top of page
+- **CSRF protection:** Includes CSRF token field
+- **Novalidate:** Uses `novalidate` to prevent browser validation (server-side only)
+
+**Template Variables:**
+- `form`: EmailAddressForm instance
+- `service_name`: Sending service name
+- `service_contact_info`: Support contact
+- `contact_info_type`: Contact method type
+
+### Download Page
+
+**File:** `app/templates/views/download.html`
+
+**Route:** `/d/<service_id>/<document_id>/download`
+
+**Purpose:** Display file information and download link
+
+**Template Variables:**
+- `download_link`: Pre-signed S3 URL for direct download
+- `file_size`: Formatted size (e.g., "2.5 MB")
+- `file_type`: Formatted type (e.g., "PDF")
+- `service_name`: Sending service
+- `service_contact_info`: Support contact
+- `contact_info_type`: Contact type
+- `file_expiry_date`: When file expires (optional)
+
+### File Unavailable Page
+
+**File:** `app/templates/views/file-unavailable.html`
+
+**Purpose:** Error page for 404/410 errors on document access
+
+**Template Variables:**
+- `status_code`: HTTP status code (404 or 410)
+- `service_name`: Sending service name
+- `service_contact_info`: Support contact
+- `contact_info_type`: Contact method
+
+## Error Templates
+
+Standardized error pages in `app/templates/error/`:
+
+- **400.html** - Bad Request
+- **401.html** - Unauthorized
+- **403.html** - Forbidden
+- **404.html** - Not Found
+- **410.html** - Gone (expired documents)
+- **429.html** - Too Many Requests (rate limiting)
+- **500.html** - Internal Server Error
+
+### Rate Limit Error (429)
+
+**File:** `app/templates/error/429.html`
+
+**Template Variables:**
+- `go_back_link`: URL to return to (usually the form page)
+- `page_name`: Context of where error occurred
+
+**Usage Example:**
+```python
+return (
+    render_template(
+        "error/429.html",
+        go_back_link=request.url,
+        page_name="confirm your email address"
+    ),
+    429,
+)
+```
+
+## Component Templates
+
+### GOV.UK Input Component
+
+**File:** `app/templates/components/govuk_input.html`
+
+**Purpose:** Wrapper for GOV.UK Design System input component
+
+```html
+{%- from "govuk_frontend_jinja/components/input/macro.html" import govukInput -%}
+{{ govukInput(params) }}
+```
+
+Used by custom form fields to render GOV.UK-compliant inputs.
+
+### Custom Footer
+
+**File:** `app/templates/components/footer/macro.html`
+
+**Macro:** `govukFooterWithoutExternalLinks`
+
+**Purpose:** Footer without external navigation links (simplified version)
+
+## Macros
+
+### Error Summary Macro
+
+**File:** `app/templates/macros/error_summary.html`
+
+**Macro:** `render_error_summary(form)`
+
+**Purpose:** Render GOV.UK error summary component for form errors
+
+**Usage:**
+```html
+{%- from "macros/error_summary.html" import render_error_summary -%}
+{{ render_error_summary(form) }}
+```
+
+Displays:
+- Form-level errors (`form.form_errors`)
+- Field-level errors from form validation
+
+## GOV.UK Frontend Integration
+
+### Components Used
+
+From `govuk_frontend_jinja` package:
+
+- **govukButton** - Primary action buttons
+- **govukHeader** - Standard GOV.UK header
+- **govukInput** - Text input fields
+- **govukFooter** - Page footer (customized)
+
+### Design System
+
+Follows [GOV.UK Design System](https://design-system.service.gov.uk/) standards:
+
+- Accessible HTML5 semantics
+- Consistent spacing using utility classes
+- Mobile-first responsive design
+- WCAG 2.1 AAA compliance
+
+### Utility Classes
+
+Common GOV.UK CSS utility classes:
+
+```html
+<!-- Typography -->
+<h1 class="govuk-heading-l">Large heading</h1>
+<p class="govuk-body">Body text</p>
+
+<!-- Spacing -->
+<p class="govuk-!-margin-bottom-0">No bottom margin</p>
+
+<!-- Grid -->
+<div class="govuk-grid-row">
+  <div class="govuk-grid-column-two-thirds">
+    <!-- Content -->
+  </div>
+</div>
+
+<!-- Links -->
+<a href="#" class="govuk-link">Standard link</a>
+```
+
+## Asset Pipeline
+
+Assets loaded via `asset_url()` helper:
+
+```html
+{{ asset_url('stylesheets/main.css') }}
+{{ asset_url('javascripts/main.js') }}
+{{ asset_url('images/favicon.ico') }}
+```
+
+This function handles:
+- Cache busting via manifest file
+- CDN URL prefixing in production
+- Local development paths
+
+## Security Features
+
+### Content Security Policy
+
+Templates use CSP nonce for inline scripts:
+
+```html
+{% set cspNonce = request.csp_nonce %}
+```
+
+### Referrer Policy
+
+Prevents document URLs from leaking:
+
+```html
+<meta name="referrer" content="never">
+```
+
+### Link Security
+
+External links use `rel="noreferrer"`:
+
+```html
+<a href="{{ service_contact_info }}" class="govuk-link" rel="noreferrer">
+  contact {{ service_name }}
+</a>
+```
+
+## Template Inheritance
+
+Inheritance hierarchy:
+
+```
+govuk_frontend_jinja/template.html (GOV.UK base)
+└── document_download_template.html (app base)
+    ├── landing.html
+    ├── confirm-email-address.html
+    ├── download.html
+    └── file-unavailable.html
+```
+
+Child templates override:
+- `per_page_title` - Page-specific title
+- `main_content` - Main content area
+- `content` - Full content block (when custom layout needed)

@@ -1,0 +1,198 @@
+---
+title: "ServiceApiClient"
+description: "API client for retrieving service information from the Notify API"
+---
+
+The `ServiceApiClient` class provides an interface to fetch service details from the GOV.UK Notify API, used to display service names and contact information on document download pages.
+
+## Class Overview
+
+### ServiceApiClient
+
+API client wrapper around NotificationsAPIClient configured for service data retrieval.
+
+**Location:** `app/notify_client/service_api_client.py`
+
+## Initialization
+
+### \_\_init\_\_
+
+Creates a configured ServiceApiClient instance.
+
+<ParamField path="app" type="Flask" required>
+  Flask application instance with configuration
+</ParamField>
+
+**Required Configuration:**
+- `API_HOST_NAME`: Base URL for Notify API
+- `ADMIN_CLIENT_USER_NAME`: Client username (service ID)
+- `ADMIN_CLIENT_SECRET`: Client secret for authentication
+
+```python
+from flask import current_app
+from app.notify_client.service_api_client import ServiceApiClient
+
+client = ServiceApiClient(app=current_app)
+```
+
+**Implementation Details:**
+
+```python
+class ServiceApiClient:
+    def __init__(self, app):
+        self.api_client = OnwardsRequestNotificationsAPIClient(
+            "x" * 100,  # Placeholder API key (overridden below)
+            base_url=app.config["API_HOST_NAME"],
+        )
+        # Configure actual credentials
+        self.api_client.service_id = app.config["ADMIN_CLIENT_USER_NAME"]
+        self.api_client.api_key = app.config["ADMIN_CLIENT_SECRET"]
+```
+
+<Note>
+The client uses a placeholder API key during initialization because credential lengths don't match what `NotificationsAPIClient.__init__` expects. Actual credentials are set directly after initialization.
+</Note>
+
+## Methods
+
+### get_service
+
+Retrieves service information by service ID.
+
+<ParamField path="service_id" type="UUID" required>
+  Service identifier (UUID or string)
+</ParamField>
+
+<ResponseField name="response" type="dict">
+  Service data from API
+</ResponseField>
+
+**Response Structure:**
+
+```json
+{
+  "data": {
+    "id": "123e4567-e89b-12d3-a456-426614174000",
+    "name": "Example Government Service",
+    "contact_link": "help@example.gov.uk"
+  }
+}
+```
+
+**Usage Example:**
+
+```python
+from app import service_api_client
+
+try:
+    service = service_api_client.get_service(service_id)
+    service_name = service["data"]["name"]
+    contact_info = service["data"]["contact_link"]
+except HTTPError as e:
+    # Handle API errors (404, 500, etc.)
+    abort(e.status_code)
+```
+
+**API Endpoint:**
+```
+GET {API_HOST_NAME}/service/{service_id}
+```
+
+**Error Handling:**
+- Raises `HTTPError` from `notifications_python_client` on API errors
+- Caller should catch and handle errors appropriately (see view functions)
+
+## OnwardsRequestNotificationsAPIClient
+
+Internal client class that extends `NotificationsAPIClient` with request header forwarding.
+
+### generate_headers
+
+Generates HTTP headers including authentication and request forwarding.
+
+<ParamField path="api_token" type="string" required>
+  API authentication token
+</ParamField>
+
+<ResponseField name="headers" type="dict">
+  HTTP headers for API request
+</ResponseField>
+
+**Behavior:**
+1. Calls parent `NotificationsAPIClient.generate_headers()` for authentication
+2. Merges onwards request headers if in request context
+3. Returns combined headers dictionary
+
+**Onwards Headers:**
+When called within a Flask request context, propagates tracing headers:
+- `X-Request-ID`: Request tracking identifier
+- `X-B3-TraceId`, `X-B3-SpanId`: Distributed tracing headers
+- Other monitoring/debugging headers
+
+```python
+class OnwardsRequestNotificationsAPIClient(NotificationsAPIClient):
+    def generate_headers(self, api_token):
+        headers = super().generate_headers(api_token)
+        
+        if has_request_context() and hasattr(request, "get_onwards_request_headers"):
+            headers = {
+                **request.get_onwards_request_headers(),
+                **headers,
+            }
+        
+        return headers
+```
+
+**Example Headers:**
+```python
+{
+    "Authorization": "Bearer eyJhbGc...",
+    "User-Agent": "NOTIFY-API-PYTHON-CLIENT/...",
+    "X-Request-ID": "abc123-def456",
+    "X-B3-TraceId": "trace-789",
+    "X-B3-SpanId": "span-012"
+}
+```
+
+## Global Instance
+
+The application provides a thread-safe global instance accessible from `app`:
+
+```python
+from app import service_api_client
+
+# Use directly in view functions
+def my_view():
+    service = service_api_client.get_service(service_id)
+```
+
+**Thread Safety:**
+The global `service_api_client` is implemented using `ContextVar` and `LocalProxy`:
+
+```python
+# From app/__init__.py
+_service_api_client_context_var: ContextVar[ServiceApiClient] = ContextVar("service_api_client")
+get_service_api_client: LazyLocalGetter[ServiceApiClient] = LazyLocalGetter(
+    _service_api_client_context_var,
+    lambda: ServiceApiClient(app=current_app),
+)
+service_api_client = LocalProxy(get_service_api_client)
+```
+
+This ensures:
+- Each request gets its own client instance
+- No state leakage between concurrent requests
+- Lazy initialization only when needed
+
+## Configuration Reference
+
+See [Configuration Classes](/api-reference/config) for environment variable setup:
+
+- `API_HOST_NAME`
+- `ADMIN_CLIENT_USER_NAME`
+- `ADMIN_CLIENT_SECRET`
+
+## Related Documentation
+
+- [View Functions](/api-reference/views) - Usage in route handlers
+- [Application Initialization](/api-reference/app-init) - Client setup and lifecycle

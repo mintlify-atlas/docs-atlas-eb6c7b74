@@ -1,0 +1,384 @@
+---
+title: Production Deployment
+description: Production deployment considerations, best practices, and operational guidelines
+---
+
+This guide covers production deployment considerations for the Document Download Frontend service.
+
+## Prerequisites
+
+Before deploying to production:
+
+1. **Built Docker image** following the [Docker build process](/deployment/docker)
+2. **Environment variables** configured (see [Configuration](/configuration/environment-variables))
+3. **Redis instance** available for caching and rate limiting
+4. **Notify API** backend accessible
+5. **Load balancer** or reverse proxy (recommended)
+
+## Deployment Architecture
+
+The production deployment uses:
+
+- **Gunicorn** as the WSGI server
+- **Eventlet** worker class for async operations
+- **Non-root user** (`notify`) for security
+- **Multi-stage Docker build** for minimal image size
+
+### Container Startup
+
+Start the production container with the `web` command:
+
+```bash
+docker run -p 7001:7001 \
+  -e PORT=7001 \
+  -e HTTP_SERVE_TIMEOUT_SECONDS=30 \
+  document-download-frontend web
+```
+
+This executes:
+
+```bash
+gunicorn --error-logfile - -c /home/vcap/app/gunicorn_config.py application
+```
+
+## Gunicorn Configuration
+
+Production configuration in `gunicorn_config.py`:
+
+```python
+from notifications_utils.gunicorn.defaults import set_gunicorn_defaults
+
+set_gunicorn_defaults(globals())
+
+workers = 10
+worker_class = "eventlet"
+worker_connections = 1000
+keepalive = 90
+timeout = int(os.getenv("HTTP_SERVE_TIMEOUT_SECONDS", 30))
+```
+
+### Worker Configuration
+
+**Workers**: Set to `10` worker processes
+- Adjust based on CPU cores: `(2 × cores) + 1`
+- Each worker handles multiple concurrent connections
+- Balance between throughput and memory usage
+
+**Worker class**: Uses `eventlet` for async I/O
+- Non-blocking I/O for better concurrency
+- Efficient for I/O-bound operations (API calls, Redis)
+- Handles 1000 concurrent connections per worker
+
+**Timeout**: Default 30 seconds
+- Override with `HTTP_SERVE_TIMEOUT_SECONDS`
+- Note: Has limited effect with eventlet worker class
+- Set appropriate values for document download operations
+
+**Keepalive**: 90 seconds
+- Reduces connection overhead
+- Improves performance for HTTP/1.1 clients
+
+## Security Best Practices
+
+### Non-Root User
+
+The production image runs as the `notify` user:
+
+```dockerfile
+RUN groupadd -r notify && useradd -r -g notify notify
+USER notify
+```
+
+**Benefits:**
+- Limits container breakout impact
+- Follows principle of least privilege
+- Prevents accidental system modifications
+
+### File Permissions
+
+All application files owned by `notify:notify`:
+
+```dockerfile
+COPY --chown=notify:notify app app
+COPY --chown=notify:notify application.py entrypoint.sh gunicorn_config.py ./
+```
+
+Virtual environment owned by `root:root` to prevent tampering:
+
+```dockerfile
+COPY --from=python_build --chown=root:root /opt/venv /opt/venv
+```
+
+### Bytecode Compilation
+
+Pre-compile Python bytecode for integrity:
+
+```dockerfile
+RUN python -m compileall .
+```
+
+**Advantages:**
+- Faster application startup
+- Prevents runtime bytecode injection
+- Validates Python syntax at build time
+
+## Health Checks
+
+Implement container health checks for orchestration platforms:
+
+```dockerfile
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+  CMD curl -f http://localhost:${PORT}/_status || exit 1
+```
+
+Or in docker-compose:
+
+```yaml
+services:
+  web:
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7001/_status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+```
+
+## Resource Limits
+
+Set appropriate container resource limits:
+
+```yaml
+services:
+  web:
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+```
+
+**Memory considerations:**
+- Base Python + Flask: ~200-300MB
+- Per Gunicorn worker: ~100-150MB
+- 10 workers: ~1.5GB recommended minimum
+- Add headroom for peak traffic
+
+## Logging
+
+Production logging configuration:
+
+### Log Directory
+
+Created in the production image:
+
+```dockerfile
+RUN mkdir /home/vcap/logs
+```
+
+Mount as volume for persistence:
+
+```yaml
+volumes:
+  - ./logs:/home/vcap/logs
+```
+
+### Gunicorn Logs
+
+Errors logged to stdout:
+
+```bash
+gunicorn --error-logfile - ...
+```
+
+Combine with Docker logging drivers:
+
+```yaml
+services:
+  web:
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+```
+
+### Python Logging
+
+Unbuffered output for real-time logs:
+
+```dockerfile
+ENV PYTHONUNBUFFERED=1
+```
+
+## Monitoring
+
+### Key Metrics
+
+Monitor these metrics for production health:
+
+1. **Request rate**: Total requests per second
+2. **Response time**: P50, P95, P99 latencies
+3. **Error rate**: 4xx and 5xx responses
+4. **Worker utilization**: Active vs idle workers
+5. **Memory usage**: Per worker and total
+6. **Redis connections**: Active connections and command latency
+
+### Prometheus Integration
+
+The `notifications-utils` package provides Prometheus metrics.
+
+Expose metrics endpoint:
+
+```python
+from notifications_utils.prometheus_metrics import init_prometheus
+
+init_prometheus(app)
+```
+
+## Deployment Checklist
+
+Before deploying to production:
+
+- [ ] Build production Docker image
+- [ ] Set all required environment variables
+- [ ] Configure Redis connection
+- [ ] Set up health check endpoint
+- [ ] Configure resource limits
+- [ ] Enable log aggregation
+- [ ] Set up monitoring and alerts
+- [ ] Test document download flow
+- [ ] Verify rate limiting behavior
+- [ ] Configure reverse proxy/load balancer
+- [ ] Enable HTTPS/TLS termination
+- [ ] Review security headers
+- [ ] Test graceful shutdown
+- [ ] Document rollback procedure
+
+## Scaling
+
+### Horizontal Scaling
+
+Run multiple container instances behind a load balancer:
+
+```yaml
+services:
+  web:
+    deploy:
+      replicas: 3
+      update_config:
+        parallelism: 1
+        delay: 10s
+      rollback_config:
+        parallelism: 1
+        delay: 5s
+```
+
+**Considerations:**
+- Redis sessions must be centralized
+- Use sticky sessions if needed
+- Coordinate rate limiting across instances
+
+### Vertical Scaling
+
+Adjust worker count based on load:
+
+```python
+import multiprocessing
+
+workers = (2 * multiprocessing.cpu_count()) + 1
+```
+
+Or set via environment variable:
+
+```python
+workers = int(os.getenv("GUNICORN_WORKERS", 10))
+```
+
+## Version Management
+
+The build process generates version information:
+
+```bash
+make generate-version-file
+```
+
+Creates `app/version.py`:
+
+```python
+__git_commit__ = "abc123..."
+__time__ = "2026-03-04:12:00:00"
+```
+
+**Usage:**
+- Expose via `/_status` endpoint
+- Include in error reports
+- Track deployed versions
+- Correlate with git commits
+
+## Rollback Strategy
+
+1. **Tag Docker images** with git commit SHA:
+   ```bash
+   docker tag document-download-frontend:latest \
+     document-download-frontend:${GIT_COMMIT}
+   ```
+
+2. **Keep previous images** available for quick rollback
+
+3. **Test rollback procedure** regularly
+
+4. **Monitor deployment** with staged rollouts:
+   ```yaml
+   deploy:
+     update_config:
+       failure_action: rollback
+       monitor: 30s
+   ```
+
+## Production Environment Variables
+
+Essential variables for production:
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `PORT` | Yes | HTTP server port (e.g., 7001) |
+| `HTTP_SERVE_TIMEOUT_SECONDS` | No | Gunicorn timeout (default: 30) |
+| `NOTIFY_ENVIRONMENT` | Yes | Environment name (production) |
+| `REDIS_ENABLED` | Yes | Enable Redis (true) |
+| `REDIS_URL` | Yes | Redis connection string |
+| `API_HOST_NAME` | Yes | Notify API backend URL |
+| `SECRET_KEY` | Yes | Flask secret key |
+| `DANGEROUS_SALT` | Yes | Token signing salt |
+
+See [Environment Configuration](/configuration/environment-variables) for complete list.
+
+## Cloud Foundry Deployment
+
+The application uses `/home/vcap` paths compatible with Cloud Foundry:
+
+```dockerfile
+WORKDIR /home/vcap/app
+RUN mkdir /home/vcap/logs
+```
+
+**Cloud Foundry manifest example:**
+
+```yaml
+applications:
+  - name: document-download-frontend
+    memory: 2G
+    instances: 3
+    health-check-type: http
+    health-check-http-endpoint: /_status
+    env:
+      HTTP_SERVE_TIMEOUT_SECONDS: 30
+```
+
+## Next Steps
+
+- Review [Docker Build](/deployment/docker) for image creation
+- Configure [Environment Variables](/configuration/environment-variables)

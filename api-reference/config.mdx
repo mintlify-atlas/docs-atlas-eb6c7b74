@@ -1,0 +1,289 @@
+---
+title: "Configuration Classes"
+description: "Environment-based configuration for development, testing, and production"
+---
+
+The `app/config.py` module defines configuration classes for different deployment environments, managing API endpoints, secrets, and application behavior.
+
+## Base Configuration
+
+### Config
+
+Base configuration class with production defaults.
+
+**Class:** `app.config.Config`
+
+#### Environment Variables
+
+<ParamField path="ADMIN_CLIENT_SECRET" type="string" required>
+  Secret key for authenticating with Notify API
+</ParamField>
+
+<ParamField path="SECRET_KEY" type="string" required>
+  Flask secret key for session signing and CSRF protection
+</ParamField>
+
+<ParamField path="API_HOST_NAME" type="string" required>
+  Base URL for Notify API (e.g., `https://api.notifications.service.gov.uk`)
+</ParamField>
+
+<ParamField path="NOTIFY_ENVIRONMENT" type="string" required>
+  Environment name for logging (e.g., `production`, `staging`, `development`)
+</ParamField>
+
+<ParamField path="NOTIFY_REQUEST_LOG_LEVEL" type="string" default="INFO">
+  Log level for request logging (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+</ParamField>
+
+<ParamField path="DOCUMENT_DOWNLOAD_API_HOST_NAME" type="string" required>
+  Public URL for Document Download API (e.g., `https://download.notifications.service.gov.uk`)
+</ParamField>
+
+<ParamField path="DOCUMENT_DOWNLOAD_API_HOST_NAME_INTERNAL" type="string" required>
+  Internal URL for Document Download API (may differ from public URL for internal networking)
+</ParamField>
+
+<ParamField path="HEADER_COLOUR" type="string" default="#FFBF47">
+  GOV.UK header bar color (hex code)
+</ParamField>
+
+<ParamField path="HTTP_PROTOCOL" type="string" default="http">
+  Protocol for secure cookie settings (`http` or `https`)
+</ParamField>
+
+#### Class Attributes
+
+```python
+class Config:
+    ADMIN_CLIENT_SECRET = os.environ.get("ADMIN_CLIENT_SECRET")
+    ADMIN_CLIENT_USER_NAME = "notify-admin"
+    SECRET_KEY = os.environ.get("SECRET_KEY")
+    
+    API_HOST_NAME = os.environ.get("API_HOST_NAME")
+    
+    DEBUG = False
+    
+    NOTIFY_ENVIRONMENT = os.environ["NOTIFY_ENVIRONMENT"]
+    NOTIFY_REQUEST_LOG_LEVEL = os.getenv("NOTIFY_REQUEST_LOG_LEVEL", "INFO")
+    
+    DOCUMENT_DOWNLOAD_API_HOST_NAME = os.environ.get("DOCUMENT_DOWNLOAD_API_HOST_NAME")
+    DOCUMENT_DOWNLOAD_API_HOST_NAME_INTERNAL = os.environ.get("DOCUMENT_DOWNLOAD_API_HOST_NAME_INTERNAL")
+    
+    HEADER_COLOUR = os.environ.get("HEADER_COLOUR", "#FFBF47")  # $yellow
+    HTTP_PROTOCOL = os.environ.get("HTTP_PROTOCOL", "http")
+```
+
+<Warning>
+`ADMIN_CLIENT_USER_NAME` is hardcoded to `"notify-admin"` and cannot be configured via environment variable.
+</Warning>
+
+## Development Configuration
+
+### Development
+
+Configuration for local development environment.
+
+**Class:** `app.config.Development`
+
+**Inherits:** `Config`
+
+#### Development-Specific Settings
+
+<ParamField path="SERVER_NAME" type="string" optional>
+  Flask server name for URL generation (e.g., `localhost:6002`)
+</ParamField>
+
+<ParamField path="API_HOST_NAME" type="string" default="http://localhost:6011">
+  Local Notify API URL
+</ParamField>
+
+<ParamField path="DOCUMENT_DOWNLOAD_API_HOST_NAME" type="string" default="http://localhost:7000">
+  Local Document Download API public URL
+</ParamField>
+
+<ParamField path="DOCUMENT_DOWNLOAD_API_HOST_NAME_INTERNAL" type="string" default="http://localhost:7000">
+  Local Document Download API internal URL (same as public in development)
+</ParamField>
+
+#### Overrides
+
+```python
+class Development(Config):
+    SERVER_NAME = os.getenv("SERVER_NAME")
+    API_HOST_NAME = os.environ.get("API_HOST_NAME", "http://localhost:6011")
+    DOCUMENT_DOWNLOAD_API_HOST_NAME = os.environ.get(
+        "DOCUMENT_DOWNLOAD_API_HOST_NAME", 
+        "http://localhost:7000"
+    )
+    DOCUMENT_DOWNLOAD_API_HOST_NAME_INTERNAL = os.environ.get(
+        "DOCUMENT_DOWNLOAD_API_HOST_NAME", 
+        "http://localhost:7000"
+    )
+    
+    ADMIN_CLIENT_SECRET = "dev-notify-secret-key"
+    SECRET_KEY = "dev-notify-secret-key"
+    
+    DEBUG = True
+```
+
+**Key Differences:**
+- `DEBUG = True`: Enables Flask debug mode with auto-reload and detailed error pages
+- Default localhost URLs for all API endpoints
+- Insecure default secrets (never use in production)
+
+## Test Configuration
+
+### Test
+
+Configuration for automated testing environment.
+
+**Class:** `app.config.Test`
+
+**Inherits:** `Development`
+
+#### Test-Specific Settings
+
+<ParamField path="TESTING" type="boolean" default="True">
+  Enables Flask testing mode
+</ParamField>
+
+<ParamField path="WTF_CSRF_ENABLED" type="boolean" default="False">
+  Disables CSRF protection for easier testing
+</ParamField>
+
+<ParamField path="SERVER_NAME" type="string" default="document-download-frontend.gov">
+  Test domain for URL generation
+</ParamField>
+
+```python
+class Test(Development):
+    TESTING = True
+    WTF_CSRF_ENABLED = False
+    
+    SERVER_NAME = "document-download-frontend.gov"
+    
+    API_HOST_NAME = "http://test-notify-api"
+    DOCUMENT_DOWNLOAD_API_HOST_NAME = "https://download.test-doc-download-api.gov.uk"
+    DOCUMENT_DOWNLOAD_API_HOST_NAME_INTERNAL = "https://download.test-doc-download-api-internal.gov.uk"
+```
+
+**Test Endpoints:**
+- Mock API hosts for predictable testing
+- HTTPS URLs to test secure cookie behavior
+- Separate internal/external API URLs to test cookie domain logic
+
+## Configuration Selection
+
+Configurations are selected via the `NOTIFY_ENVIRONMENT` environment variable:
+
+```python
+configs = {
+    "development": Development,
+    "test": Test,
+}
+```
+
+**Usage in Application:**
+
+```python
+# From app/__init__.py
+def create_app(application):
+    notify_environment = os.environ["NOTIFY_ENVIRONMENT"]
+    if notify_environment in configs:
+        application.config.from_object(configs[notify_environment])
+    else:
+        application.config.from_object(Config)
+```
+
+**Selection Logic:**
+- `NOTIFY_ENVIRONMENT=development` → Uses `Development` class
+- `NOTIFY_ENVIRONMENT=test` → Uses `Test` class
+- Any other value (including `production`, `staging`) → Uses base `Config` class
+
+<Note>
+Production and staging environments use the base `Config` class and must provide all required environment variables.
+</Note>
+
+## Environment Variable Examples
+
+### Development
+
+```bash
+export NOTIFY_ENVIRONMENT=development
+# All other variables use Development class defaults
+```
+
+### Production
+
+```bash
+export NOTIFY_ENVIRONMENT=production
+export ADMIN_CLIENT_SECRET="prod-secret-key-abc123"
+export SECRET_KEY="flask-secret-xyz789"
+export API_HOST_NAME="https://api.notifications.service.gov.uk"
+export DOCUMENT_DOWNLOAD_API_HOST_NAME="https://download.notifications.service.gov.uk"
+export DOCUMENT_DOWNLOAD_API_HOST_NAME_INTERNAL="http://document-download-api.internal"
+export HEADER_COLOUR="#1d70b8"  # GOV.UK blue
+export HTTP_PROTOCOL="https"
+export NOTIFY_REQUEST_LOG_LEVEL="WARNING"
+```
+
+### Testing
+
+```bash
+export NOTIFY_ENVIRONMENT=test
+# Test class provides all defaults for pytest
+```
+
+## Configuration Access
+
+Access configuration in application code:
+
+```python
+from flask import current_app
+
+# In view functions or application context
+api_host = current_app.config["API_HOST_NAME"]
+debug_mode = current_app.config["DEBUG"]
+header_color = current_app.config["HEADER_COLOUR"]
+```
+
+## Security Considerations
+
+<Warning>
+**Never commit secrets to version control:**
+- `ADMIN_CLIENT_SECRET`
+- `SECRET_KEY`
+
+Use environment variables or secret management services in production.
+</Warning>
+
+### Secret Key Requirements
+
+**ADMIN_CLIENT_SECRET:**
+- Used for API authentication with Notify backend
+- Must match the secret configured for `notify-admin` service ID
+
+**SECRET_KEY:**
+- Used by Flask for session signing and CSRF tokens
+- Should be cryptographically random (e.g., `secrets.token_hex(32)`)
+- Must remain consistent across application restarts to preserve sessions
+
+### HTTPS Configuration
+
+**HTTP_PROTOCOL:**
+- Set to `"https"` in production for secure cookies
+- Affects cookie `Secure` flag in email verification flow
+
+```python
+# From views.py confirm_email_address:
+set_cookie_values = {
+    "secure": current_app.config["HTTP_PROTOCOL"] == "https",
+    "httponly": True,
+}
+```
+
+## Related Documentation
+
+- [Application Initialization](/api-reference/app-init) - How configuration is loaded
+- [ServiceApiClient](/api-reference/service-client) - API client configuration usage
+- [View Functions](/api-reference/views) - Configuration in route handlers

@@ -1,0 +1,242 @@
+---
+title: Docker Build and Deployment
+description: Multi-stage Docker build process and container deployment for Document Download Frontend
+---
+
+The Document Download Frontend uses a multi-stage Docker build process to create optimized production images.
+
+## Dockerfile Architecture
+
+The Dockerfile (`docker/Dockerfile`) implements a multi-stage build with four distinct stages:
+
+### Base Stage
+
+The base stage establishes the foundation for all subsequent stages:
+
+```dockerfile
+FROM --platform=linux/amd64 python:3.13-slim-bookworm AS base
+
+COPY --from=ghcr.io/astral-sh/uv:0.5.30 /uv /uvx /bin/
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    UV_CACHE_DIR='/tmp/uv-cache/' \
+    UV_COMPILE_BYTECODE=1 \
+    VIRTUAL_ENV="/opt/venv"
+```
+
+**Key features:**
+- Uses Python 3.13 slim Debian Bookworm image
+- Includes `uv` package manager from Astral
+- Sets unbuffered Python output for better logging
+- Configures bytecode compilation for performance
+
+### Frontend Build Stage
+
+Builds static assets using Node.js:
+
+```dockerfile
+FROM --platform=linux/amd64 node:24-bookworm-slim AS frontend_build
+
+WORKDIR /usr/frontend
+COPY app app
+COPY package-lock.json package.json rollup.config.mjs ./
+
+RUN npm ci --no-audit \
+    && npm run build
+```
+
+**Outputs:**
+- Compiled JavaScript bundles (via Rollup)
+- Processed CSS and static assets
+- Optimized templates
+
+### Python Build Stage
+
+Installs Python dependencies and generates version information:
+
+```dockerfile
+FROM base AS python_build
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+    build-essential \
+    git \
+    && rm -rf /var/lib/apt/lists/* /tmp/*
+
+COPY requirements.txt .
+
+RUN python3 -m venv /opt/venv && \
+    uv pip sync --python /opt/venv/bin/python requirements.txt
+
+RUN make generate-version-file
+```
+
+**Key operations:**
+- Installs build dependencies (gcc, git)
+- Creates isolated virtual environment at `/opt/venv`
+- Uses `uv` for fast dependency resolution
+- Generates version file with git commit and timestamp
+
+### Production Stage
+
+Creates the minimal production image:
+
+```dockerfile
+FROM base AS production
+
+RUN groupadd -r notify && useradd -r -g notify notify && chown -R notify:notify /home/vcap
+
+USER notify
+
+RUN mkdir /home/vcap/logs
+
+COPY --from=python_build --chown=root:root /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:${PATH}"
+
+COPY --chown=notify:notify app app
+COPY --chown=notify:notify application.py entrypoint.sh gunicorn_config.py ./
+COPY --from=frontend_build /usr/frontend/app/static app/static
+COPY --from=frontend_build /usr/frontend/app/templates app/templates
+```
+
+**Security features:**
+- Runs as non-root user (`notify`)
+- Minimal layer copying from build stages
+- Proper file ownership and permissions
+- Compiles Python bytecode for integrity
+
+### Test Stage
+
+Extends production with testing tools:
+
+```dockerfile
+FROM production AS test
+
+USER root
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      curl \
+      git \
+      make
+
+COPY --chown=notify:notify Makefile requirements_for_test.txt ./
+RUN make bootstrap
+```
+
+This stage includes development dependencies for running tests in CI/CD pipelines.
+
+## Building Images
+
+### Production Build
+
+Build the production image:
+
+```bash
+docker build -f docker/Dockerfile --target production -t document-download-frontend .
+```
+
+### Test Build
+
+Build with testing dependencies:
+
+```bash
+make bootstrap-with-docker
+```
+
+Or manually:
+
+```bash
+docker build -f docker/Dockerfile --target test -t document-download-frontend .
+```
+
+## Running Containers
+
+### Entrypoint Script
+
+The `entrypoint.sh` script provides flexible container startup:
+
+```bash
+#!/bin/bash
+
+if [ "$1" == "web" ]
+then
+  exec gunicorn --error-logfile - -c /home/vcap/app/gunicorn_config.py application
+
+elif [ "$1" == "web-local" ]
+then
+  exec flask run --host 0.0.0.0 --port $PORT
+else
+  echo "Running custom command"
+  exec $@
+fi
+```
+
+### Start Production Server
+
+```bash
+docker run -p 7001:7001 -e PORT=7001 document-download-frontend web
+```
+
+### Start Development Server
+
+```bash
+make run-flask-with-docker
+```
+
+This runs the Flask development server with debugging enabled.
+
+### Run Tests
+
+```bash
+make test-with-docker
+```
+
+## Gunicorn Configuration
+
+Production deployment uses Gunicorn with the following settings (`gunicorn_config.py`):
+
+```python
+workers = 10
+worker_class = "eventlet"
+worker_connections = 1000
+keepalive = 90
+timeout = int(os.getenv("HTTP_SERVE_TIMEOUT_SECONDS", 30))
+```
+
+**Configuration details:**
+- **Workers**: 10 worker processes for concurrent request handling
+- **Worker class**: Eventlet for async I/O operations
+- **Worker connections**: 1000 concurrent connections per worker
+- **Keepalive**: 90 seconds for connection reuse
+- **Timeout**: Configurable via `HTTP_SERVE_TIMEOUT_SECONDS` (default 30s)
+
+## Image Optimization
+
+The multi-stage build provides several optimizations:
+
+1. **Layer separation**: Build dependencies not included in production
+2. **Bytecode compilation**: Pre-compiled `.pyc` files for faster startup
+3. **Minimal base**: Slim Debian image without unnecessary packages
+4. **Cache optimization**: `UV_CACHE_DIR` uses `/tmp` for build-time caching
+5. **Security**: Non-root user with minimal permissions
+
+## Environment Variables
+
+Key environment variables used in the Docker build:
+
+| Variable | Default | Purpose |
+|----------|---------|----------|
+| `PYTHONUNBUFFERED` | `1` | Disable Python output buffering |
+| `UV_COMPILE_BYTECODE` | `1` | Enable bytecode compilation |
+| `UV_CACHE_DIR` | `/tmp/uv-cache/` | UV package cache location |
+| `VIRTUAL_ENV` | `/opt/venv` | Virtual environment path |
+| `PATH` | `/opt/venv/bin:$PATH` | Include venv in PATH |
+| `PORT` | Required | HTTP server port |
+| `HTTP_SERVE_TIMEOUT_SECONDS` | `30` | Gunicorn timeout |
+
+## Next Steps
+
+- Review [Production Deployment](/deployment/production) for deployment best practices
+- See [Configuration](/configuration/environment-variables) for environment setup

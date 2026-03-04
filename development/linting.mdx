@@ -1,0 +1,172 @@
+---
+title: Code Quality & Linting
+description: Linting and formatting tools for Python, JavaScript, and SCSS
+---
+
+## Overview
+
+The project uses multiple linters to maintain code quality:
+
+- **Ruff** - Python linting and formatting
+- **ESLint** - JavaScript linting
+- **Stylelint** - SCSS linting
+
+## Python: Ruff
+
+### Run Linting
+
+```bash
+make lint
+```
+
+This runs both checks:
+1. Code linting: `ruff check .`
+2. Format checking: `ruff format --check .`
+
+### Check Code Only
+
+```bash
+ruff check .
+```
+
+### Check Formatting
+
+```bash
+ruff format --check .
+```
+
+### Auto-Fix Issues
+
+```bash
+ruff check --fix .
+```
+
+### Auto-Format Code
+
+```bash
+ruff format .
+```
+
+## Ruff Configuration
+
+Configuration is defined in `ruff.toml`:
+
+```toml
+line-length = 120
+target-version = "py313"
+
+extend-exclude = [
+    "migrations/versions/",
+    "__pycache__",
+    "cache",
+    "migrations",
+    "build",
+    "sample_cap_xml_documents.py",
+]
+```
+
+### Enabled Rules
+
+- **E, W** - pycodestyle errors and warnings
+- **F** - pyflakes
+- **I** - isort (import sorting)
+- **B** - flake8-bugbear
+- **C90** - mccabe cyclomatic complexity
+- **G** - flake8-logging-format
+- **T20** - flake8-print (no print statements)
+- **UP** - pyupgrade (modern Python syntax)
+- **C4** - flake8-comprehensions
+- **ISC** - flake8-implicit-str-concat
+- **RSE** - flake8-raise
+- **PIE** - flake8-pie
+- **N804** - class method naming
+- **RUF100** - unused noqa directives
+
+## JavaScript: ESLint
+
+### Run ESLint
+
+```bash
+npm run lint:js
+```
+
+### Configuration
+
+ESLint is configured in `eslint.config.mjs` to lint JavaScript modules in `app/assets/**/*.mjs`.
+
+Key rules:
+- Semicolons required
+- Warnings for unused variables and undefined variables
+- Based on ESLint recommended configuration
+
+## SCSS: Stylelint
+
+### Run Stylelint
+
+```bash
+npm run lint:scss
+```
+
+or
+
+```bash
+npm test
+```
+
+### Configuration
+
+Stylelint is configured in `stylelint.config.mjs`:
+
+```javascript
+export default {
+  extends: [
+    "stylelint-config-standard-scss",
+    "stylelint-config-gds/scss"
+  ],
+  // Custom rule overrides
+}
+```
+
+The configuration extends:
+- `stylelint-config-standard-scss` - Standard SCSS rules
+- `stylelint-config-gds/scss` - GOV.UK Design System SCSS rules
+
+## CI Integration
+
+Linting is automatically run:
+- Before tests via `make test`
+- In CI/CD pipelines
+- Should be run before committing code
+
+## Pre-commit Workflow
+
+Recommended workflow before committing:
+
+```bash
+# Auto-fix Python issues
+ruff check --fix .
+ruff format .
+
+# Check JavaScript and SCSS
+npm run lint:js
+npm run lint:scss
+
+# Run tests (includes linting)
+make test
+```
+
+## NPM Audit
+
+Check for security vulnerabilities in npm packages:
+
+```bash
+make npm-audit
+```
+
+or
+
+```bash
+npm run audit
+```
+
+This runs `better-npm-audit` to check production dependencies for high-severity issues.

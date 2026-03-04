@@ -1,0 +1,363 @@
+---
+title: API Client
+description: ServiceApiClient for communicating with GOV.UK Notify API
+---
+
+## Overview
+
+The Document Download Frontend uses `ServiceApiClient` to communicate with the GOV.UK Notify API for retrieving service information. This client extends the `notifications-python-client` library with custom request header forwarding.
+
+**File:** `app/notify_client/service_api_client.py`
+
+## ServiceApiClient Class
+
+### Class Definition
+
+```python
+class ServiceApiClient:
+    def __init__(self, app):
+        self.api_client = OnwardsRequestNotificationsAPIClient(
+            "x" * 100,
+            base_url=app.config["API_HOST_NAME"],
+        )
+        # our credential lengths aren't what NotificationsAPIClient's __init__ will expect
+        # given it's designed for destructuring end-user api keys
+        self.api_client.service_id = app.config["ADMIN_CLIENT_USER_NAME"]
+        self.api_client.api_key = app.config["ADMIN_CLIENT_SECRET"]
+
+    def get_service(self, service_id):
+        """
+        Retrieve a service.
+        """
+        return self.api_client.get(f"/service/{service_id}")
+```
+
+**Purpose:** Wrapper around `NotificationsAPIClient` for service-related API calls
+
+### Initialization
+
+**Constructor parameters:**
+- `app`: Flask application instance
+
+**Configuration values:**
+- `API_HOST_NAME`: Base URL for Notify API (e.g., `https://api.notifications.service.gov.uk`)
+- `ADMIN_CLIENT_USER_NAME`: Service ID for authentication
+- `ADMIN_CLIENT_SECRET`: API key secret
+
+**Credential handling:**
+```python
+self.api_client = OnwardsRequestNotificationsAPIClient(
+    "x" * 100,  # Placeholder key (overridden below)
+    base_url=app.config["API_HOST_NAME"],
+)
+self.api_client.service_id = app.config["ADMIN_CLIENT_USER_NAME"]
+self.api_client.api_key = app.config["ADMIN_CLIENT_SECRET"]
+```
+
+**Note:** Uses placeholder API key initially because `NotificationsAPIClient` expects destructured end-user API keys. Service ID and API key are set directly afterward.
+
+## OnwardsRequestNotificationsAPIClient
+
+### Custom Client Class
+
+```python
+from flask import request
+from flask.ctx import has_request_context
+from notifications_python_client.notifications import NotificationsAPIClient
+
+class OnwardsRequestNotificationsAPIClient(NotificationsAPIClient):
+    def generate_headers(self, api_token):
+        headers = super().generate_headers(api_token)
+
+        if has_request_context() and hasattr(request, "get_onwards_request_headers"):
+            headers = {
+                **request.get_onwards_request_headers(),
+                **headers,
+            }
+
+        return headers
+```
+
+**Purpose:** Extend `NotificationsAPIClient` to forward request headers
+
+**Inherits:** `notifications_python_client.notifications.NotificationsAPIClient`
+
+### Header Forwarding
+
+**Method:** `generate_headers(api_token)`
+
+**Behavior:**
+1. Call parent class `generate_headers()` to get standard auth headers
+2. Check if in Flask request context
+3. If `request.get_onwards_request_headers` exists, merge those headers
+4. Return combined headers
+
+**Header merge order:**
+```python
+headers = {
+    **request.get_onwards_request_headers(),  # Onwards headers (e.g., tracing)
+    **headers,                                  # Auth headers (take precedence)
+}
+```
+
+**Why this matters:** Preserves request tracing headers (like `X-B3-TraceId`) when making API calls, enabling distributed tracing across services.
+
+### Onwards Request Headers
+
+**Source:** Added by Flask middleware (not shown in these files)
+
+**Typical headers forwarded:**
+- `X-B3-TraceId` - Distributed tracing ID
+- `X-B3-SpanId` - Span ID for tracing
+- `X-Request-ID` - Request correlation ID
+
+**Context check:**
+```python
+if has_request_context() and hasattr(request, "get_onwards_request_headers"):
+```
+
+- `has_request_context()`: Ensures we're in a Flask request (not CLI/background task)
+- `hasattr(request, "get_onwards_request_headers")`: Checks middleware added the method
+
+## API Methods
+
+### get_service()
+
+**Method signature:**
+```python
+def get_service(self, service_id) -> dict:
+```
+
+**Purpose:** Retrieve service details from Notify API
+
+**Parameters:**
+- `service_id` (str|UUID): Service UUID
+
+**Returns:** Dictionary containing service data
+
+**API Endpoint:**
+```
+GET {API_HOST_NAME}/service/{service_id}
+```
+
+**Response structure:**
+```json
+{
+  "data": {
+    "id": "service-uuid",
+    "name": "Service Name",
+    "contact_link": "https://example.com/contact",
+    "email_from": "service",
+    "active": true,
+    "restricted": false,
+    "created_at": "2024-01-01T00:00:00.000000Z"
+  }
+}
+```
+
+**Used in routes:**
+- `landing()` (`index.py:52`)
+- `confirm_email_address()` (`index.py:102`)
+- `download_document()` (`index.py:185`)
+
+**Usage example:**
+```python
+from app import service_api_client
+from notifications_python_client.errors import HTTPError
+
+try:
+    service = service_api_client.get_service(service_id)
+    service_name = service["data"]["name"]
+    service_contact_info = service["data"]["contact_link"]
+except HTTPError as e:
+    abort(e.status_code)
+```
+
+## Error Handling
+
+### HTTPError Exceptions
+
+**Source:** `notifications_python_client.errors.HTTPError`
+
+**Raised when:** API returns non-2xx status code
+
+**Attributes:**
+- `status_code`: HTTP status code from API
+- `message`: Error message
+
+**Handling pattern:**
+```python
+from notifications_python_client.errors import HTTPError
+
+def _get_service_or_raise_error(service_id):
+    try:
+        return service_api_client.get_service(service_id)
+    except HTTPError as e:
+        abort(e.status_code)
+```
+
+**Common error codes:**
+- `404`: Service not found
+- `403`: Forbidden (invalid credentials)
+- `500`: API server error
+
+## Authentication
+
+### API Key Authentication
+
+**Method:** JWT token in `Authorization` header
+
+**Generated by:** `generate_headers()` in parent class
+
+**Header format:**
+```
+Authorization: Bearer <JWT_TOKEN>
+```
+
+**JWT payload includes:**
+- `iss`: Service ID (from `ADMIN_CLIENT_USER_NAME`)
+- `iat`: Issued at timestamp
+
+**Signed with:** API key secret (from `ADMIN_CLIENT_SECRET`)
+
+### Configuration
+
+**Environment variables:**
+```bash
+API_HOST_NAME=https://api.notifications.service.gov.uk
+ADMIN_CLIENT_USER_NAME=service-uuid
+ADMIN_CLIENT_SECRET=api-key-secret
+```
+
+**In application factory:**
+```python
+from app.notify_client.service_api_client import ServiceApiClient
+
+service_api_client = ServiceApiClient(app)
+```
+
+## Integration with Views
+
+### Global Instance
+
+**File:** `app/__init__.py`
+
+```python
+from app.notify_client.service_api_client import ServiceApiClient
+
+service_api_client = ServiceApiClient(app)
+```
+
+**Imported in views:**
+```python
+from app import service_api_client
+```
+
+### Usage in Routes
+
+**Helper function pattern:**
+```python
+def _get_service_or_raise_error(service_id):
+    try:
+        return service_api_client.get_service(service_id)
+    except HTTPError as e:
+        abort(e.status_code)
+```
+
+**In route handlers:**
+```python
+@main.route("/d/<base64_uuid:service_id>/<base64_uuid:document_id>")
+def landing(service_id, document_id):
+    service = _get_service_or_raise_error(service_id)
+    service_name = service["data"]["name"]
+    service_contact_info = service["data"]["contact_link"]
+    # ... continue processing
+```
+
+## Alternative: Direct API Calls
+
+Some endpoints bypass `ServiceApiClient` and use `requests` directly:
+
+### Document Metadata
+
+**Why not use ServiceApiClient?** Document Download API is separate from Notify API
+
+**Implementation:**
+```python
+import requests
+from flask import request
+from flask.ctx import has_request_context
+
+def _get_document_metadata(service_id, document_id, key):
+    check_file_url = "{}/services/{}/documents/{}/check?key={}".format(
+        current_app.config["DOCUMENT_DOWNLOAD_API_HOST_NAME_INTERNAL"],
+        service_id,
+        document_id,
+        key
+    )
+    headers = {}
+    if has_request_context() and hasattr(request, "get_onwards_request_headers"):
+        headers.update(request.get_onwards_request_headers())
+
+    response = requests.get(check_file_url, headers=headers)
+    # ... handle response
+```
+
+**Note:** Uses same onwards header pattern as `OnwardsRequestNotificationsAPIClient`
+
+## Dependencies
+
+**Required packages:**
+- `notifications-python-client` - Official Notify Python client
+- `Flask` - Request context handling
+
+**Imports:**
+```python
+from flask import request
+from flask.ctx import has_request_context
+from notifications_python_client.notifications import NotificationsAPIClient
+from notifications_python_client.errors import HTTPError
+```
+
+## Testing Considerations
+
+### Mocking Service API
+
+```python
+import pytest
+from unittest.mock import Mock
+from app import service_api_client
+
+@pytest.fixture
+def mock_get_service(mocker):
+    return mocker.patch.object(
+        service_api_client,
+        'get_service',
+        return_value={
+            "data": {
+                "name": "Test Service",
+                "contact_link": "https://example.com",
+            }
+        }
+    )
+```
+
+### Request Context for Headers
+
+```python
+from flask import Flask
+
+app = Flask(__name__)
+with app.test_request_context():
+    # Code that uses service_api_client here
+    # Will not have onwards headers unless explicitly added
+    pass
+```
+
+## Related Configuration
+
+**Config keys used:**
+- `API_HOST_NAME` - Notify API base URL
+- `ADMIN_CLIENT_USER_NAME` - Service ID for auth
+- `ADMIN_CLIENT_SECRET` - API key secret
+- `DOCUMENT_DOWNLOAD_API_HOST_NAME_INTERNAL` - Document API URL (separate service)

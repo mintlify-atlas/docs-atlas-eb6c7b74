@@ -1,0 +1,330 @@
+---
+title: Application Routes
+description: All Flask routes and endpoints in the document download frontend
+---
+
+## Overview
+
+The Document Download Frontend uses Flask's Blueprint system to organize routes. All routes are defined in the `main` Blueprint within `app/main/views/index.py`.
+
+## Health Check Routes
+
+### Status Endpoint
+
+**Route:** `GET /_status`
+
+**Function:** `status()` (`index.py:23`)
+
+**Purpose:** Health check endpoint for monitoring
+
+**Response:**
+```json
+{
+  "status": "ok"
+}
+```
+
+**Status Code:** `200`
+
+## Legacy API Redirect Routes
+
+### Services Endpoints
+
+**Routes:**
+- `GET /services/_status`
+- `GET /services/<uuid:service_id>/documents/<uuid:document_id>`
+- `GET /services/<uuid:service_id>/documents/<uuid:document_id>.<extension>`
+- `GET /services/<uuid:service_id>/documents/<uuid:document_id>/check`
+
+**Function:** `services()` (`index.py:30`)
+
+**Purpose:** Legacy endpoints that redirect to the Document Download API
+
+**Parameters:**
+- `service_id` (UUID, optional): Service identifier
+- `document_id` (UUID, optional): Document identifier
+- `extension` (string, optional): File extension
+
+**Behavior:**
+```python
+api_host = current_app.config["DOCUMENT_DOWNLOAD_API_HOST_NAME"]
+path = request.path
+query_string = request.query_string.decode("utf-8")
+if len(query_string) > 1:
+    return redirect(f"{api_host}{path}?{query_string}", 301)
+else:
+    return redirect(f"{api_host}{path}", 301)
+```
+
+**Status Code:** `301` (Permanent Redirect)
+
+## Security Policy Routes
+
+### Security.txt
+
+**Routes:**
+- `GET /.well-known/security.txt`
+- `GET /security.txt`
+
+**Function:** `security_policy()` (`index.py:44`)
+
+**Purpose:** Implements GDS Way security vulnerability disclosure policy
+
+**Reference:** [GDS Way Security Standards](https://gds-way.cloudapps.digital/standards/vulnerability-disclosure.html#vulnerability-disclosure-and-security-txt)
+
+**Behavior:** Redirects to Cabinet Office VDP security.txt
+
+## Document Download Routes
+
+### Landing Page
+
+**Route:** `GET /d/<base64_uuid:service_id>/<base64_uuid:document_id>`
+
+**Function:** `landing()` (`index.py:52`)
+
+**Purpose:** Initial landing page when user clicks document link
+
+**Parameters:**
+- `service_id` (base64-encoded UUID): Service that sent the document
+- `document_id` (base64-encoded UUID): Document identifier
+- `key` (query parameter, required): Decryption key for the document
+
+**Behavior:**
+1. Validates `key` query parameter exists (404 if missing)
+2. Fetches service information via `ServiceApiClient`
+3. Retrieves document metadata from Document Download API
+4. Checks if email confirmation is required via `confirm_email` metadata field
+5. Routes to appropriate next step:
+   - If `confirm_email` is `True`: redirects to email confirmation
+   - Otherwise: redirects to download page
+
+**Error Handling:**
+- Returns `file-unavailable.html` template for 404/410 errors
+- Aborts with 404 if `key` parameter missing
+
+**Template:** `views/landing.html`
+
+**Example:**
+```
+/d/c2VydmljZS1pZA==/ZG9jLWlk?key=encryption-key-here
+```
+
+### Email Confirmation
+
+**Route:** `GET|POST /d/<base64_uuid:service_id>/<base64_uuid:document_id>/confirm-email-address`
+
+**Function:** `confirm_email_address()` (`index.py:102`)
+
+**Purpose:** Verify user's email address before allowing download
+
+**Parameters:**
+- `service_id` (base64-encoded UUID): Service identifier
+- `document_id` (base64-encoded UUID): Document identifier
+- `key` (query parameter, required): Decryption key
+
+**GET Behavior:**
+1. Validates `key` exists (404 if missing)
+2. Fetches service information
+3. Retrieves document metadata
+4. If `confirm_email` is `False`, redirects to download page
+5. Displays email confirmation form
+
+**POST Behavior:**
+1. Validates email address using `EmailAddressForm`
+2. Authenticates email via Document Download API
+3. On success:
+   - Sets `document_access_signed_data` cookie with authentication token
+   - Cookie configured with proper domain, path, and security flags
+   - Redirects to download page
+4. On failure:
+   - Returns error message:
+   ```
+   This is not the email address the file was sent to.
+   
+   To confirm the file was meant for you, enter the email address
+   {service_name} sent the file to.
+   ```
+
+**Rate Limiting:**
+- Returns 429 error if too many authentication attempts
+
+**Cookie Configuration:**
+```python
+set_cookie_values = {
+    "key": "document_access_signed_data",
+    "value": authentication_data["signed_data"],
+    "path": authentication_data["cookie_path"],
+    "secure": current_app.config["HTTP_PROTOCOL"] == "https",
+    "httponly": True,
+    "domain": cookie_domain  # Allows subdomain access
+}
+```
+
+**Template:** `views/confirm-email-address.html`
+
+**Status Codes:**
+- `200`: Form displayed successfully
+- `400`: Form validation errors
+- `429`: Too many requests
+
+### Download Page
+
+**Route:** `GET /d/<base64_uuid:service_id>/<base64_uuid:document_id>/download`
+
+**Function:** `download_document()` (`index.py:185`)
+
+**Purpose:** Display download page with file information and download link
+
+**Parameters:**
+- `service_id` (base64-encoded UUID): Service identifier
+- `document_id` (base64-encoded UUID): Document identifier
+- `key` (query parameter, required): Decryption key
+
+**Behavior:**
+1. Validates `key` parameter (404 if missing)
+2. Fetches service information
+3. Retrieves document metadata including:
+   - `direct_file_url`: Pre-signed download URL
+   - `size_in_bytes`: File size
+   - `file_extension`: File type
+   - `available_until`: Expiry timestamp
+4. Formats display information:
+   - File size: via `format_file_size()`
+   - File type: via `format_file_type()`
+   - Expiry date: via `_format_file_expiry_date()`
+
+**Template Variables:**
+- `download_link`: Direct URL to download file
+- `file_size`: Human-readable file size (e.g., "2.5 MB")
+- `file_type`: Human-readable file type (e.g., "PDF")
+- `service_name`: Name of sending service
+- `service_contact_info`: Support contact
+- `contact_info_type`: Type of contact (link, email, phone)
+- `file_expiry_date`: Formatted expiry date
+
+**Template:** `views/download.html`
+
+## Helper Functions
+
+### Format File Expiry Date
+
+**Function:** `_format_file_expiry_date()` (`index.py:221`)
+
+**Purpose:** Format ISO timestamp into user-friendly date
+
+**Parameters:**
+- `available_until` (str): ISO 8601 timestamp
+
+**Returns:** Formatted date string
+
+**Logic:**
+```python
+file_expiry_date = parser.parse(available_until).date()
+formatted_date = file_expiry_date.strftime("%d %B %Y").lstrip("0")
+day_of_week = file_expiry_date.strftime("%A")
+
+# Show day of week if within 30 days
+if file_expiry_date - date.today() <= timedelta(days=30):
+    return f"{day_of_week} {formatted_date}"
+
+return formatted_date
+```
+
+**Examples:**
+- Within 30 days: `"Monday 15 March 2026"`
+- After 30 days: `"15 March 2026"`
+
+### Get Service
+
+**Function:** `_get_service_or_raise_error()` (`index.py:234`)
+
+**Purpose:** Fetch service details from Notify API
+
+**Parameters:**
+- `service_id`: Service UUID
+
+**Returns:** Service data dictionary
+
+**Error Handling:** Aborts with API error status code on failure
+
+### Get Document Metadata
+
+**Function:** `_get_document_metadata()` (`index.py:241`)
+
+**Purpose:** Retrieve document metadata from Document Download API
+
+**Parameters:**
+- `service_id`: Service UUID
+- `document_id`: Document UUID
+- `key`: Decryption key
+
+**API Endpoint:**
+```
+GET {DOCUMENT_DOWNLOAD_API_HOST_NAME_INTERNAL}/services/{service_id}/documents/{document_id}/check?key={key}
+```
+
+**Response Structure:**
+```json
+{
+  "document": {
+    "direct_file_url": "https://...",
+    "size_in_bytes": 1024000,
+    "file_extension": "pdf",
+    "available_until": "2026-03-31T23:59:59Z",
+    "confirm_email": true
+  }
+}
+```
+
+**Error Handling:**
+- `400` with "decryption key" or "Forbidden" in error message → 404
+- `403` or `404` → 404
+- `410` → 410 (Gone)
+- Missing `available_until` or expired document → 410
+
+### Authenticate Document Access
+
+**Function:** `_authenticate_access_to_document()` (`index.py:276`)
+
+**Purpose:** Verify email address with Document Download API
+
+**Parameters:**
+- `service_id`: Service UUID
+- `document_id`: Document UUID
+- `key`: Decryption key
+- `email_address`: Email to verify
+
+**Returns:** Dictionary with `signed_data` and `cookie_path`, or `None` on auth failure
+
+**API Endpoint:**
+```
+POST {DOCUMENT_DOWNLOAD_API_HOST_NAME_INTERNAL}/services/{service_id}/documents/{document_id}/authenticate
+```
+
+**Request Body:**
+```json
+{
+  "key": "decryption-key",
+  "email_address": "user@example.com"
+}
+```
+
+**Error Handling:**
+- `429` → Raises `TooManyRequests` exception
+- `400` or `403` → Returns `None` (authentication failed)
+- Other errors → Raises for 500 handler
+
+## URL Converters
+
+The application uses custom URL converters for base64-encoded UUIDs:
+
+**Converter:** `base64_uuid`
+
+**Purpose:** Decode base64-encoded UUIDs from URL paths
+
+**Usage:**
+```python
+@main.route("/d/<base64_uuid:service_id>/<base64_uuid:document_id>")
+```
+
+This allows URLs to use URL-safe base64 encoding instead of hyphenated UUIDs, making links shorter and cleaner.

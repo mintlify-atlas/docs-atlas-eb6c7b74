@@ -1,0 +1,391 @@
+---
+title: "View Functions"
+description: "HTTP route handlers for document downloads, email verification, and service redirects"
+---
+
+The `app/main/views/index.py` module contains all HTTP route handlers for the Document Download Frontend, managing document access, email verification, and service information.
+
+## Health Check Routes
+
+### status
+
+Health check endpoint returning application status.
+
+**Route:** `GET /_status`
+
+<ResponseField name="status" type="string">
+  Always returns "ok"
+</ResponseField>
+
+<ResponseField name="http_status" type="integer">
+  Always returns 200
+</ResponseField>
+
+```python
+GET /_status
+
+Response:
+{
+  "status": "ok"
+}
+```
+
+## Service Routes
+
+### services
+
+Redirects legacy service document URLs to the Document Download API.
+
+**Routes:**
+- `GET /services/_status`
+- `GET /services/<uuid:service_id>/documents/<uuid:document_id>`
+- `GET /services/<uuid:service_id>/documents/<uuid:document_id>.<extension>`
+- `GET /services/<uuid:service_id>/documents/<uuid:document_id>/check`
+
+<ParamField path="service_id" type="UUID" optional>
+  Service identifier (optional)
+</ParamField>
+
+<ParamField path="document_id" type="UUID" optional>
+  Document identifier (optional)
+</ParamField>
+
+<ParamField path="extension" type="string" optional>
+  File extension (optional)
+</ParamField>
+
+<ResponseField name="redirect" type="301">
+  Permanent redirect to DOCUMENT_DOWNLOAD_API_HOST_NAME with same path and query string
+</ResponseField>
+
+```python
+GET /services/123e4567-e89b-12d3-a456-426614174000/documents/987fcdeb-51a2-43f7-8765-123456789abc
+
+Redirects to:
+https://api.document-download.service.gov.uk/services/123e4567-e89b-12d3-a456-426614174000/documents/987fcdeb-51a2-43f7-8765-123456789abc
+```
+
+### security_policy
+
+Redirects to GOV.UK security.txt for vulnerability disclosure.
+
+**Routes:**
+- `GET /.well-known/security.txt`
+- `GET /security.txt`
+
+<ResponseField name="redirect" type="302">
+  Redirects to https://vdp.cabinetoffice.gov.uk/.well-known/security.txt
+</ResponseField>
+
+## Document Access Routes
+
+### landing
+
+Document landing page with service information and download link.
+
+**Route:** `GET /d/<base64_uuid:service_id>/<base64_uuid:document_id>`
+
+<ParamField path="service_id" type="UUID" required>
+  Base64-encoded service UUID
+</ParamField>
+
+<ParamField path="document_id" type="UUID" required>
+  Base64-encoded document UUID
+</ParamField>
+
+<ParamField query="key" type="string" required>
+  Document decryption key (query parameter)
+</ParamField>
+
+<ResponseField name="html" type="string">
+  Rendered landing page template
+</ResponseField>
+
+**Behavior:**
+- Validates decryption key presence (404 if missing)
+- Fetches service details and contact information
+- Retrieves document metadata
+- Redirects to email confirmation if `confirm_email=true` in metadata
+- Otherwise redirects to direct download
+
+**Error Handling:**
+- Returns 404/410 with `file-unavailable.html` template for missing/expired documents
+
+```python
+GET /d/ABC123/XYZ789?key=decryption-key
+
+Response: Landing page HTML with:
+- Service name and contact info
+- Continue button to confirm_email_address or download_document
+```
+
+### confirm_email_address
+
+Email verification page for secure document access.
+
+**Route:** `GET/POST /d/<base64_uuid:service_id>/<base64_uuid:document_id>/confirm-email-address`
+
+<ParamField path="service_id" type="UUID" required>
+  Base64-encoded service UUID
+</ParamField>
+
+<ParamField path="document_id" type="UUID" required>
+  Base64-encoded document UUID
+</ParamField>
+
+<ParamField query="key" type="string" required>
+  Document decryption key
+</ParamField>
+
+<ParamField body="email_address" type="string" required>
+  Email address to verify (POST only)
+</ParamField>
+
+<ResponseField name="html" type="string">
+  Email confirmation form or redirect to download
+</ResponseField>
+
+**GET Behavior:**
+- Displays email address form
+- Redirects to download if metadata has `confirm_email=false`
+
+**POST Behavior:**
+- Validates email address format
+- Calls `_authenticate_access_to_document` API
+- Sets secure `document_access_signed_data` cookie with domain scope
+- Redirects to download page on success
+- Shows form error if email doesn't match
+
+**Cookie Configuration:**
+```python
+Cookie: document_access_signed_data
+Path: /services/{service_id}/documents/{document_id}
+Domain: .document-download.service.gov.uk
+Secure: true (HTTPS only)
+HttpOnly: true
+```
+
+**Error Handling:**
+- **429 Too Many Requests**: Rate limit exceeded, shows retry message
+- **400/403**: Invalid email address, shows form error
+- Returns 400 status code if form has validation errors
+
+```python
+POST /d/ABC123/XYZ789/confirm-email-address?key=decryption-key
+Content-Type: application/x-www-form-urlencoded
+
+email_address=user@example.com
+
+Response: 
+- Success: 302 redirect to download with cookie set
+- Failure: 400 with form errors
+```
+
+### download_document
+
+Document download page with file details and download link.
+
+**Route:** `GET /d/<base64_uuid:service_id>/<base64_uuid:document_id>/download`
+
+<ParamField path="service_id" type="UUID" required>
+  Base64-encoded service UUID
+</ParamField>
+
+<ParamField path="document_id" type="UUID" required>
+  Base64-encoded document UUID
+</ParamField>
+
+<ParamField query="key" type="string" required>
+  Document decryption key
+</ParamField>
+
+<ResponseField name="html" type="string">
+  Download page with file information and direct download link
+</ResponseField>
+
+**Template Data:**
+- `download_link`: Direct file URL from metadata
+- `file_size`: Formatted file size (e.g., "2.5 MB")
+- `file_type`: Human-readable file type (e.g., "PDF")
+- `service_name`: Service name for context
+- `service_contact_info`: Contact link or email
+- `file_expiry_date`: Formatted expiry date (if available)
+
+**Error Handling:**
+- Returns 404/410 with `file-unavailable.html` for missing/expired documents
+
+```python
+GET /d/ABC123/XYZ789/download?key=decryption-key
+
+Response: Download page showing:
+- File: document.pdf (2.5 MB, PDF)
+- Expires: Monday 15 March 2026
+- Download button with direct_file_url
+```
+
+## Helper Functions
+
+### _format_file_expiry_date
+
+Formats ISO date string to human-readable expiry date.
+
+<ParamField path="available_until" type="string" required>
+  ISO 8601 datetime string
+</ParamField>
+
+<ResponseField name="formatted_date" type="string">
+  Formatted date with optional day of week
+</ResponseField>
+
+**Formatting Rules:**
+- Includes day of week if expiry within 30 days: `"Monday 15 March 2026"`
+- Otherwise only date: `"15 March 2026"`
+- Removes leading zeros from day
+
+```python
+_format_file_expiry_date("2026-03-15T23:59:59Z")
+# Returns: "Monday 15 March 2026" (if within 30 days)
+# Returns: "15 March 2026" (if beyond 30 days)
+```
+
+### _get_service_or_raise_error
+
+Fetches service details from API with error handling.
+
+<ParamField path="service_id" type="UUID" required>
+  Service identifier
+</ParamField>
+
+<ResponseField name="service" type="dict">
+  Service data with name and contact_link
+</ResponseField>
+
+**Error Handling:**
+- Calls `service_api_client.get_service(service_id)`
+- Aborts with HTTP status code from API on HTTPError
+
+```python
+service = _get_service_or_raise_error(service_id)
+# Returns: {"data": {"name": "My Service", "contact_link": "help@example.gov.uk"}}
+```
+
+### _get_document_metadata
+
+Retrieves document metadata from Document Download API.
+
+<ParamField path="service_id" type="UUID" required>
+  Service identifier
+</ParamField>
+
+<ParamField path="document_id" type="UUID" required>
+  Document identifier
+</ParamField>
+
+<ParamField path="key" type="string" required>
+  Decryption key
+</ParamField>
+
+<ResponseField name="metadata" type="dict">
+  Document metadata including file URL, size, type, and expiry
+</ResponseField>
+
+**API Endpoint:**
+```
+GET {DOCUMENT_DOWNLOAD_API_HOST_NAME_INTERNAL}/services/{service_id}/documents/{document_id}/check?key={key}
+```
+
+**Response Fields:**
+- `direct_file_url`: Download URL
+- `size_in_bytes`: File size in bytes
+- `file_extension`: File extension (e.g., ".pdf")
+- `available_until`: ISO datetime string or null
+- `confirm_email`: Boolean for email verification requirement
+
+**Error Handling:**
+- **400**: Invalid/missing decryption key → 404
+- **403/404**: Document not found → 404
+- **410**: Document expired → 410
+- **500+**: Raises for status (handled by global error handler)
+- Validates `available_until` expiry, aborts 410 if expired
+
+```python
+metadata = _get_document_metadata(service_id, document_id, key)
+# Returns:
+{
+  "direct_file_url": "https://s3.../document.pdf",
+  "size_in_bytes": 2621440,
+  "file_extension": ".pdf",
+  "available_until": "2026-03-15T23:59:59Z",
+  "confirm_email": true
+}
+```
+
+### _authenticate_access_to_document
+
+Authenticates email address for document access.
+
+<ParamField path="service_id" type="UUID" required>
+  Service identifier
+</ParamField>
+
+<ParamField path="document_id" type="UUID" required>
+  Document identifier
+</ParamField>
+
+<ParamField path="key" type="string" required>
+  Decryption key
+</ParamField>
+
+<ParamField path="email_address" type="string" required>
+  Email address to authenticate
+</ParamField>
+
+<ResponseField name="result" type="dict | None">
+  Authentication data with signed_data and cookie_path, or None if authentication failed
+</ResponseField>
+
+**API Endpoint:**
+```
+POST {DOCUMENT_DOWNLOAD_API_HOST_NAME_INTERNAL}/services/{service_id}/documents/{document_id}/authenticate
+Content-Type: application/json
+
+{"key": "decryption-key", "email_address": "user@example.gov.uk"}
+```
+
+**Success Response:**
+```python
+{
+  "signed_data": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "cookie_path": "/services/123/documents/456"
+}
+```
+
+**Error Handling:**
+- **429**: Raises `TooManyRequests` exception
+- **400/403**: Returns `None` (invalid email)
+- **500+**: Raises for status (handled by global error handler)
+
+```python
+auth_data = _authenticate_access_to_document(service_id, document_id, key, "user@example.gov.uk")
+if auth_data:
+    # Email verified, set cookie and redirect
+    response.set_cookie(
+        key="document_access_signed_data",
+        value=auth_data["signed_data"],
+        path=auth_data["cookie_path"]
+    )
+else:
+    # Invalid email address
+    show_error()
+```
+
+## Request Headers
+
+All API requests include onwards request headers from the original request when available:
+
+```python
+if has_request_context() and hasattr(request, 'get_onwards_request_headers'):
+    headers.update(request.get_onwards_request_headers())
+```
+
+This propagates tracing headers (X-Request-ID, etc.) through the request chain.

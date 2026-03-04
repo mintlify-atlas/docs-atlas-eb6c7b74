@@ -1,0 +1,283 @@
+---
+title: Configuration Classes
+description: Configuration classes and settings structure for Document Download Frontend
+---
+
+The Document Download Frontend uses Flask's configuration object pattern with environment-specific configuration classes.
+
+## Configuration Architecture
+
+Configuration is managed through Python classes in `app/config.py:1-57`. The application supports multiple environments with inheritance:
+
+```
+Config (base)
+  └── Development
+        └── Test
+```
+
+The appropriate configuration is loaded based on the `NOTIFY_ENVIRONMENT` environment variable.
+
+## Config Classes
+
+### Base Config
+
+The `Config` class contains all production and shared settings.
+
+<CodeGroup>
+```python Config Class Structure
+class Config:
+    # Authentication
+    ADMIN_CLIENT_SECRET = os.environ.get("ADMIN_CLIENT_SECRET")
+    ADMIN_CLIENT_USER_NAME = "notify-admin"
+    SECRET_KEY = os.environ.get("SECRET_KEY")
+    
+    # API Configuration
+    API_HOST_NAME = os.environ.get("API_HOST_NAME")
+    DOCUMENT_DOWNLOAD_API_HOST_NAME = os.environ.get("DOCUMENT_DOWNLOAD_API_HOST_NAME")
+    DOCUMENT_DOWNLOAD_API_HOST_NAME_INTERNAL = os.environ.get("DOCUMENT_DOWNLOAD_API_HOST_NAME_INTERNAL")
+    
+    # Logging
+    DEBUG = False
+    NOTIFY_ENVIRONMENT = os.environ["NOTIFY_ENVIRONMENT"]
+    NOTIFY_REQUEST_LOG_LEVEL = os.getenv("NOTIFY_REQUEST_LOG_LEVEL", "INFO")
+    
+    # UI Settings
+    HEADER_COLOUR = os.environ.get("HEADER_COLOUR", "#FFBF47")
+    HTTP_PROTOCOL = os.environ.get("HTTP_PROTOCOL", "http")
+```
+</CodeGroup>
+
+**Source:** `app/config.py:4-25`
+
+<Note>
+The `NOTIFY_ENVIRONMENT` config option is purely used for logging. It should not be used for any logical conditionals in the code.
+</Note>
+
+### Development Config
+
+The `Development` class extends `Config` with development-specific defaults.
+
+<CodeGroup>
+```python Development Class
+class Development(Config):
+    SERVER_NAME = os.getenv("SERVER_NAME")
+    
+    # API defaults for local development
+    API_HOST_NAME = os.environ.get("API_HOST_NAME", "http://localhost:6011")
+    DOCUMENT_DOWNLOAD_API_HOST_NAME = os.environ.get(
+        "DOCUMENT_DOWNLOAD_API_HOST_NAME", 
+        "http://localhost:7000"
+    )
+    DOCUMENT_DOWNLOAD_API_HOST_NAME_INTERNAL = os.environ.get(
+        "DOCUMENT_DOWNLOAD_API_HOST_NAME", 
+        "http://localhost:7000"
+    )
+    
+    # Development secrets (DO NOT use in production)
+    ADMIN_CLIENT_SECRET = "dev-notify-secret-key"
+    SECRET_KEY = "dev-notify-secret-key"
+    
+    # Enable debug mode
+    DEBUG = True
+```
+</CodeGroup>
+
+**Source:** `app/config.py:27-39`
+
+<Warning>
+Development secrets are hardcoded for convenience but must never be used in production environments.
+</Warning>
+
+### Test Config
+
+The `Test` class extends `Development` with test-specific settings.
+
+<CodeGroup>
+```python Test Class
+class Test(Development):
+    TESTING = True
+    WTF_CSRF_ENABLED = False
+    
+    # Test domain name
+    SERVER_NAME = "document-download-frontend.gov"
+    
+    # Test API endpoints
+    API_HOST_NAME = "http://test-notify-api"
+    DOCUMENT_DOWNLOAD_API_HOST_NAME = "https://download.test-doc-download-api.gov.uk"
+    DOCUMENT_DOWNLOAD_API_HOST_NAME_INTERNAL = "https://download.test-doc-download-api-internal.gov.uk"
+```
+</CodeGroup>
+
+**Source:** `app/config.py:41-51`
+
+## Configuration Loading
+
+The application loads configuration in `app/__init__.py:55-60`:
+
+<CodeGroup>
+```python Configuration Loading
+def create_app(application):
+    notify_environment = os.environ["NOTIFY_ENVIRONMENT"]
+    if notify_environment in configs:
+        application.config.from_object(configs[notify_environment])
+    else:
+        application.config.from_object(Config)
+```
+</CodeGroup>
+
+The `configs` dictionary maps environment names to configuration classes:
+
+```python
+configs = {
+    "development": Development,
+    "test": Test,
+}
+```
+
+**Source:** `app/config.py:53-56`
+
+## Gunicorn Configuration
+
+Gunicorn server settings are configured in `gunicorn_config.py:1-13`:
+
+<CodeGroup>
+```python Gunicorn Settings
+from notifications_utils.gunicorn.defaults import set_gunicorn_defaults
+
+set_gunicorn_defaults(globals())
+
+workers = 10
+worker_class = "eventlet"
+worker_connections = 1000
+keepalive = 90
+timeout = int(os.getenv("HTTP_SERVE_TIMEOUT_SECONDS", 30))
+```
+</CodeGroup>
+
+### Gunicorn Settings Explained
+
+<ParamField path="workers" type="integer" default="10">
+  Number of worker processes for handling requests.
+</ParamField>
+
+<ParamField path="worker_class" type="string" default="eventlet">
+  Worker class type. Uses `eventlet` for async I/O support.
+</ParamField>
+
+<ParamField path="worker_connections" type="integer" default="1000">
+  Maximum number of simultaneous clients per worker (eventlet only).
+</ParamField>
+
+<ParamField path="keepalive" type="integer" default="90">
+  Seconds to wait for requests on a Keep-Alive connection.
+</ParamField>
+
+<ParamField path="timeout" type="integer" default="30">
+  Workers silent for more than this many seconds are killed and restarted.
+  
+  Controlled by `HTTP_SERVE_TIMEOUT_SECONDS` environment variable.
+  
+  <Note>
+  Has little effect with eventlet worker class.
+  </Note>
+</ParamField>
+
+## Application Middleware
+
+The application uses middleware configured in `application.py:1-30`:
+
+<CodeGroup>
+```python Middleware Configuration
+from whitenoise import WhiteNoise
+from notifications_utils.eventlet import EventletTimeoutMiddleware, using_eventlet
+
+# Static file serving
+application.wsgi_app = WhiteNoise(application.wsgi_app, STATIC_ROOT, STATIC_URL)
+
+# Eventlet timeout middleware (if using eventlet)
+if using_eventlet:
+    application.wsgi_app = EventletTimeoutMiddleware(
+        application.wsgi_app,
+        timeout_seconds=int(os.getenv("HTTP_SERVE_TIMEOUT_SECONDS", 30)),
+    )
+```
+</CodeGroup>
+
+### WhiteNoise
+
+Serves static files efficiently in production:
+- **STATIC_ROOT:** `{PROJECT_ROOT}/app/static`
+- **STATIC_URL:** `static/`
+
+**Source:** `application.py:16-23`
+
+### EventletTimeoutMiddleware
+
+Provides request timeout protection when using eventlet workers. Controlled by the `HTTP_SERVE_TIMEOUT_SECONDS` environment variable.
+
+**Source:** `application.py:25-29`
+
+## Security Headers
+
+The application applies security headers to all responses in `app/__init__.py:113-148`:
+
+<CodeGroup>
+```python Security Headers
+def useful_headers_after_request(response):
+    response.headers.add("X-Robots-Tag", "noindex, nofollow")
+    response.headers.add("X-Frame-Options", "DENY")
+    response.headers.add("X-Content-Type-Options", "nosniff")
+    response.headers.add("X-Permitted-Cross-Domain-Policies", "none")
+    response.headers.add("Referrer-Policy", "no-referrer")
+    response.headers.add("Cache-Control", "no-store, no-cache, private, must-revalidate")
+    response.headers.add("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload")
+    response.headers.add("Cross-Origin-Embedder-Policy", "require-corp;")
+    response.headers.add("Cross-Origin-Opener-Policy", "same-origin;")
+    response.headers.add("Cross-Origin-Resource-Policy", "same-origin;")
+    response.headers.add("Server", "Cloudfront")
+    
+    # Content Security Policy
+    response.headers.add("Content-Security-Policy", 
+        "default-src 'self';"
+        "script-src 'self' 'nonce-{csp_nonce}';"
+        "connect-src 'self';"
+        "object-src 'self';"
+        "font-src 'self' data:;"
+        "img-src 'self' data:;"
+        "style-src 'self' 'nonce-{csp_nonce}';"
+        "frame-ancestors 'self';"
+        "frame-src 'self';"
+    )
+    
+    # Permissions Policy
+    response.headers.add("Permissions-Policy",
+        "geolocation=(), microphone=(), camera=(), autoplay=(), payment=(), sync-xhr=()"
+    )
+```
+</CodeGroup>
+
+## Admin Client Configuration
+
+The admin client is configured with a fixed username and environment-specific secret:
+
+<ParamField path="ADMIN_CLIENT_USER_NAME" type="string" default="notify-admin">
+  Username for the admin client. Hardcoded to `notify-admin`.
+  
+  **Source:** `app/config.py:6`
+</ParamField>
+
+## Template Configuration
+
+Global template variables are injected in `app/__init__.py:89-95`:
+
+```python
+@application.context_processor
+def inject_global_template_variables():
+    return {
+        "asset_path": "/static/",
+        "header_colour": application.config["HEADER_COLOUR"],
+        "asset_url": asset_fingerprinter.get_url,
+    }
+```
+
+These variables are available in all Jinja2 templates.

@@ -1,0 +1,271 @@
+---
+title: Running Locally
+description: Start the Document Download Frontend application in your local development environment
+---
+
+After [bootstrapping your development environment](/getting-started/development), you can run the application locally.
+
+## Starting the Application
+
+<Steps>
+  <Step title="Ensure dependencies are installed">
+    If you haven't already run bootstrap:
+    ```bash
+    make bootstrap
+    ```
+  </Step>
+
+  <Step title="Start the Flask development server">
+    ```bash
+    make run-flask
+    ```
+    
+    This will start the application on `http://localhost:7001` with debug mode enabled.
+    
+    The command sets the following environment variables:
+    - `FLASK_APP=application.py` - Specifies the Flask application entry point
+    - `FLASK_DEBUG=1` - Enables debug mode with auto-reloading and detailed error pages
+  </Step>
+
+  <Step title="Access the application">
+    Open your browser and navigate to:
+    ```
+    http://localhost:7001
+    ```
+  </Step>
+</Steps>
+
+## Development Workflow
+
+### Auto-rebuilding Frontend Assets
+
+During development, you'll likely make changes to JavaScript, SCSS, or other frontend assets. To automatically recompile these on changes:
+
+<Steps>
+  <Step title="Open a new terminal window">
+    Keep your Flask server running in one terminal.
+  </Step>
+
+  <Step title="Start the asset watcher">
+    In the new terminal, run:
+    ```bash
+    npm run watch
+    ```
+    
+    This will monitor your frontend files and rebuild them automatically when changes are detected.
+  </Step>
+
+  <Step title="Restart the app after asset changes">
+    After frontend assets are recompiled, restart the Flask server so they are served with the correct `Content-Length` header.
+    
+    Press `Ctrl+C` in the Flask server terminal, then run:
+    ```bash
+    make run-flask
+    ```
+  </Step>
+</Steps>
+
+<Note>
+If you're using [notifications-local](https://github.com/alphagov/notifications-local) Docker setup, restart the container instead:
+```bash
+docker compose restart document-download-frontend
+```
+</Note>
+
+### Running with Docker
+
+You can also run the application using Docker:
+
+<Steps>
+  <Step title="Bootstrap with Docker">
+    ```bash
+    make bootstrap-with-docker
+    ```
+    
+    This builds a Docker image with all dependencies installed.
+  </Step>
+
+  <Step title="Run Flask with Docker">
+    ```bash
+    make run-flask-with-docker
+    ```
+    
+    This uses the `scripts/run_locally_with_docker.sh` script to run the Flask server in a container.
+  </Step>
+</Steps>
+
+## Testing
+
+### Running Tests Locally
+
+<Steps>
+  <Step title="Run the full test suite">
+    ```bash
+    make test
+    ```
+    
+    This command will:
+    - Run linting checks with ruff (static analysis and formatting)
+    - Execute all tests in the `tests/` directory with pytest
+    - Run tests in parallel using `pytest-xdist` (`-n auto`)
+    - Stop after 10 failures (`--maxfail=10`)
+  </Step>
+</Steps>
+
+### Running Tests with Docker
+
+```bash
+make test-with-docker
+```
+
+### Linting Only
+
+To run just the linting checks without tests:
+
+```bash
+make lint
+```
+
+This will:
+- Check code with `ruff check .`
+- Check formatting with `ruff format --check .`
+
+### Frontend Linting
+
+To lint SCSS files:
+
+```bash
+npm run lint:scss
+```
+
+To lint JavaScript files:
+
+```bash
+npm run lint:js
+```
+
+## Common Development Tasks
+
+### Building Frontend Assets Manually
+
+If you need to rebuild frontend assets without watching:
+
+```bash
+npm run build
+```
+
+### Running npm Audit
+
+To check for security vulnerabilities in Node.js dependencies:
+
+```bash
+make npm-audit
+```
+
+Or directly:
+
+```bash
+npm run audit
+```
+
+This uses `better-npm-audit` to check production dependencies for high-severity issues.
+
+### Viewing Available Make Commands
+
+To see all available make commands:
+
+```bash
+make help
+```
+
+## Environment Variables
+
+The application uses several environment variables that can be configured:
+
+- `FLASK_APP` - Flask application entry point (default: `application.py`)
+- `FLASK_DEBUG` - Enable debug mode (set to `1` for development)
+- Additional configuration may be required for AWS credentials, Sentry DSN, etc.
+
+<Warning>
+Never commit sensitive environment variables or credentials to version control. Use environment files or secret management tools.
+</Warning>
+
+## Troubleshooting
+
+### Port 7001 already in use
+
+If port 7001 is already occupied:
+
+```bash
+# Find the process using port 7001
+lsof -ti:7001
+
+# Kill the process
+kill -9 $(lsof -ti:7001)
+```
+
+Or run Flask on a different port:
+
+```bash
+FLASK_APP=application.py FLASK_DEBUG=1 flask run -p 7002
+```
+
+### Frontend assets not loading
+
+If static assets aren't loading correctly:
+
+1. Rebuild the frontend:
+   ```bash
+   npm run build
+   ```
+
+2. Clear browser cache and hard reload (Cmd+Shift+R or Ctrl+Shift+R)
+
+3. Check that files exist in the static directory:
+   ```bash
+   ls -la app/static/
+   ```
+
+### Changes not reflected in the browser
+
+1. Ensure Flask debug mode is enabled (it should auto-reload)
+2. Check the terminal for any errors
+3. For frontend changes, ensure `npm run watch` is running
+4. Restart the Flask server after frontend asset changes
+
+### Tests failing
+
+If tests fail unexpectedly:
+
+```bash
+# Run tests with verbose output
+pytest -v tests/
+
+# Run a specific test file
+pytest tests/test_file.py
+
+# Run tests without parallelization for clearer output
+pytest tests/
+```
+
+### Pre-commit hooks blocking commits
+
+If pre-commit hooks are preventing you from committing:
+
+```bash
+# Let pre-commit auto-fix issues
+pre-commit run --all-files
+
+# Review the changes it made
+git diff
+
+# Commit the fixes
+git add .
+git commit -m "Fix linting issues"
+```
+
+## Next Steps
+
+- Review the [Document Download API](https://github.com/alphagov/document-download-api) documentation to understand the backend
+- Check out the [notifications-local](https://github.com/alphagov/notifications-local) repository for running the full Notify stack locally
+- Read about [updating dependencies](https://github.com/alphagov/notifications-manuals/wiki/Dependencies) in the Notify manuals

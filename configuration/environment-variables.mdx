@@ -1,0 +1,225 @@
+---
+title: Environment Variables
+description: Complete reference for all environment variables used in Document Download Frontend
+---
+
+This page documents all environment variables used to configure the Document Download Frontend application.
+
+## Required Variables
+
+These environment variables must be set for the application to run.
+
+<ParamField path="NOTIFY_ENVIRONMENT" type="string" required>
+  Environment name for the application. Used purely for logging purposes and should not be used for logical conditionals in code.
+  
+  Supported values:
+  - `development` - Loads Development config class
+  - `test` - Loads Test config class
+  - Any other value loads the base Config class
+  
+  **Source:** `app/config.py:16`, `app/__init__.py:56`
+</ParamField>
+
+## API Configuration
+
+<ParamField path="API_HOST_NAME" type="string">
+  Hostname for the Notify API service.
+  
+  **Default (Development):** `http://localhost:6011`
+  
+  **Default (Test):** `http://test-notify-api`
+  
+  **Source:** `app/config.py:9`, `app/config.py:29`
+</ParamField>
+
+<ParamField path="DOCUMENT_DOWNLOAD_API_HOST_NAME" type="string">
+  Public hostname for the Document Download API service.
+  
+  **Default (Development):** `http://localhost:7000`
+  
+  **Default (Test):** `https://download.test-doc-download-api.gov.uk`
+  
+  **Source:** `app/config.py:20`, `app/config.py:30`
+</ParamField>
+
+<ParamField path="DOCUMENT_DOWNLOAD_API_HOST_NAME_INTERNAL" type="string">
+  Internal hostname for the Document Download API service. Used for server-to-server communication.
+  
+  **Default (Development):** Falls back to `DOCUMENT_DOWNLOAD_API_HOST_NAME` value (`http://localhost:7000`)
+  
+  **Default (Test):** `https://download.test-doc-download-api-internal.gov.uk`
+  
+  **Source:** `app/config.py:21`, `app/config.py:31-33`
+</ParamField>
+
+## Security & Authentication
+
+<ParamField path="SECRET_KEY" type="string" required>
+  Secret key for Flask session signing and CSRF protection.
+  
+  **Development default:** `dev-notify-secret-key`
+  
+  <Warning>
+  Never use the development default in production. Always set a unique, randomly generated value.
+  </Warning>
+  
+  **Source:** `app/config.py:7`, `app/config.py:36`
+</ParamField>
+
+<ParamField path="ADMIN_CLIENT_SECRET" type="string" required>
+  Secret key for authenticating with the admin client.
+  
+  **Development default:** `dev-notify-secret-key`
+  
+  <Warning>
+  Never use the development default in production. Always set a unique, randomly generated value.
+  </Warning>
+  
+  **Source:** `app/config.py:5`, `app/config.py:35`
+</ParamField>
+
+## Logging
+
+<ParamField path="NOTIFY_REQUEST_LOG_LEVEL" type="string" default="INFO">
+  Log level for request logging.
+  
+  Supported values: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`
+  
+  **Source:** `app/config.py:18`
+</ParamField>
+
+## UI Customization
+
+<ParamField path="HEADER_COLOUR" type="string" default="#FFBF47">
+  Hex color code for the application header.
+  
+  Default is `#FFBF47` (yellow from GOV.UK design system).
+  
+  **Source:** `app/config.py:23`
+</ParamField>
+
+<ParamField path="HTTP_PROTOCOL" type="string" default="http">
+  HTTP protocol to use for generated URLs.
+  
+  Supported values: `http`, `https`
+  
+  **Source:** `app/config.py:24`
+</ParamField>
+
+## Server Configuration
+
+<ParamField path="SERVER_NAME" type="string">
+  Server name for the Flask application. Used for URL generation.
+  
+  **Test default:** `document-download-frontend.gov`
+  
+  Only required in specific environments (development and test).
+  
+  **Source:** `app/config.py:28`, `app/config.py:46`
+</ParamField>
+
+<ParamField path="HTTP_SERVE_TIMEOUT_SECONDS" type="integer" default="30">
+  Timeout in seconds for HTTP request serving. Used by both the eventlet middleware and gunicorn.
+  
+  **Source:** `application.py:28`, `gunicorn_config.py:12`
+</ParamField>
+
+## Performance Monitoring (Sentry)
+
+These variables control Sentry error and performance monitoring.
+
+<ParamField path="SENTRY_ENABLED" type="boolean" default="0">
+  Enable or disable Sentry monitoring.
+  
+  Set to `1` to enable, `0` to disable.
+  
+  **Source:** `app/performance.py:15`
+</ParamField>
+
+<ParamField path="SENTRY_DSN" type="string">
+  Sentry Data Source Name (DSN) for the project.
+  
+  Required when `SENTRY_ENABLED=1`.
+  
+  **Source:** `app/performance.py:16`
+</ParamField>
+
+<ParamField path="SENTRY_ALLOW_PII" type="boolean" default="0">
+  Allow Sentry to collect Personally Identifiable Information (PII).
+  
+  Set to `1` to enable, `0` to disable.
+  
+  When enabled:
+  - `send_default_pii` is set to `True`
+  - `request_bodies` is set to `medium`
+  
+  **Source:** `app/performance.py:14`, `app/performance.py:24-25`
+</ParamField>
+
+<ParamField path="SENTRY_ERRORS_SAMPLE_RATE" type="float" default="0.0">
+  Sample rate for error events sent to Sentry.
+  
+  Value between `0.0` (0%) and `1.0` (100%).
+  
+  **Source:** `app/performance.py:21`
+</ParamField>
+
+<ParamField path="SENTRY_TRACES_SAMPLE_RATE" type="float" default="0.0">
+  Sample rate for performance traces sent to Sentry.
+  
+  Value between `0.0` (0%) and `1.0` (100%).
+  
+  **Source:** `app/performance.py:22`
+</ParamField>
+
+## Test Configuration
+
+These variables are used in the Test configuration class.
+
+<ParamField path="TESTING" type="boolean">
+  Enable Flask testing mode.
+  
+  **Test default:** `True`
+  
+  **Source:** `app/config.py:42`
+</ParamField>
+
+<ParamField path="WTF_CSRF_ENABLED" type="boolean">
+  Enable CSRF protection for Flask-WTF forms.
+  
+  **Test default:** `False` (disabled for testing)
+  
+  **Source:** `app/config.py:43`
+</ParamField>
+
+## Example Configuration
+
+### Development Environment
+
+```bash
+export NOTIFY_ENVIRONMENT=development
+export SECRET_KEY=dev-notify-secret-key
+export ADMIN_CLIENT_SECRET=dev-notify-secret-key
+export API_HOST_NAME=http://localhost:6011
+export DOCUMENT_DOWNLOAD_API_HOST_NAME=http://localhost:7000
+```
+
+### Production Environment
+
+```bash
+export NOTIFY_ENVIRONMENT=production
+export SECRET_KEY=<randomly-generated-secret>
+export ADMIN_CLIENT_SECRET=<randomly-generated-secret>
+export API_HOST_NAME=https://api.notifications.service.gov.uk
+export DOCUMENT_DOWNLOAD_API_HOST_NAME=https://download.notifications.service.gov.uk
+export DOCUMENT_DOWNLOAD_API_HOST_NAME_INTERNAL=https://download-internal.notifications.service.gov.uk
+export HTTP_PROTOCOL=https
+export NOTIFY_REQUEST_LOG_LEVEL=WARNING
+export HTTP_SERVE_TIMEOUT_SECONDS=60
+
+# Sentry monitoring
+export SENTRY_ENABLED=1
+export SENTRY_DSN=https://your-sentry-dsn@sentry.io/project-id
+export SENTRY_ERRORS_SAMPLE_RATE=1.0
+export SENTRY_TRACES_SAMPLE_RATE=0.1
+```

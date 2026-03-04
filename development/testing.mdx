@@ -1,0 +1,104 @@
+---
+title: Testing
+description: Running tests and test configuration for the Document Download Frontend
+---
+
+## Running Tests
+
+The project uses pytest for testing. Tests are run automatically with linting checks.
+
+### Run All Tests
+
+```bash
+make test
+```
+
+This command runs both linting checks and the full test suite with the following options:
+- Runs tests in parallel using `pytest-xdist` (`-n auto`)
+- Stops after 10 failures (`--maxfail=10`)
+- Executes all tests in the `tests/` directory
+
+### Run Tests Only (Skip Linting)
+
+```bash
+pytest -n auto --maxfail=10 tests/
+```
+
+### Run Tests in Docker
+
+To run tests in a Docker container:
+
+```bash
+make test-with-docker
+```
+
+## Test Configuration
+
+### pytest.ini
+
+The pytest configuration is defined in `pytest.ini`:
+
+```ini
+[pytest]
+testpaths = tests
+env =
+    DOCUMENT_DOWNLOAD_API_HOST_NAME='http://localhost:6016'
+    FLASK_APP=application.py
+    ADMIN_CLIENT_SECRET=11111111-1111-1111-111111111111
+    API_HOST_NAME=http://localhost:6014
+    SECRET_KEY=test-notify-secret-key
+    NOTIFY_ENVIRONMENT=test
+```
+
+These environment variables are automatically set when running tests.
+
+## Test Structure
+
+Tests are organized in the `tests/` directory:
+
+```
+tests/
+├── __init__.py
+├── conftest.py              # Shared fixtures
+├── app/
+│   ├── main/views/         # View tests
+│   ├── notify_client/      # API client tests
+│   ├── test_config.py
+│   ├── test_errorhandlers.py
+│   ├── test_forms.py
+│   ├── test_headers.py
+│   └── test_utils.py
+└── test_gunicorn_config.py
+```
+
+## Common Fixtures
+
+Key fixtures available in `tests/conftest.py`:
+
+- `app_` - Flask application instance
+- `client` - Test client for making requests
+- `rmock` - requests-mock instance for mocking HTTP requests
+- `sample_service` - Sample service data
+- `service_id`, `document_id`, `key` - Test identifiers
+- `document_has_metadata_no_confirmation` - Mock document without email confirmation
+- `document_has_metadata_requires_confirmation` - Mock document requiring email confirmation
+
+## Writing Tests
+
+Example test using fixtures:
+
+```python
+def test_download_document(client, service_id, document_id, key, document_has_metadata_no_confirmation):
+    response = client.get(f'/d/{service_id}/{document_id}?key={key}')
+    assert response.status_code == 200
+```
+
+## Bootstrap Testing Environment
+
+To set up the testing environment:
+
+```bash
+make bootstrap
+```
+
+This installs all test dependencies from `requirements_for_test.txt` and builds frontend assets.

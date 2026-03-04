@@ -1,0 +1,279 @@
+---
+title: Document Download Frontend
+description: Secure document download service for GOV.UK Notify
+mode: custom
+---
+
+<div className="relative overflow-hidden bg-gradient-to-br from-[#1a142a] via-[#1b0f2e] to-[#33183b] dark:from-[#0f0818] dark:via-[#1a142a] dark:to-[#1b0f2e]">
+  <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(208,240,60,0.1),transparent_50%)]"></div>
+  <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_60%,rgba(212,251,101,0.08),transparent_50%)]"></div>
+  
+  <div className="relative max-w-7xl mx-auto px-6 sm:px-8 py-16 sm:py-20 lg:py-24">
+    <div className="lg:grid lg:grid-cols-12 lg:gap-8 items-center">
+      <div className="lg:col-span-7">
+        <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold text-white mb-6">
+          Document Download Frontend
+        </h1>
+        <p className="text-lg sm:text-xl text-gray-300 dark:text-gray-400 max-w-2xl mb-8">
+          Secure, accessible frontend application for downloading documents sent through GOV.UK Notify. Built with Flask, GOV.UK Frontend components, and robust security controls.
+        </p>
+        <div className="flex flex-wrap gap-4">
+          <a 
+            href="/getting-started/installation" 
+            className="inline-flex items-center justify-center px-6 py-3 text-base font-semibold rounded-lg bg-[#d0f03c] text-[#1b0f2e] hover:bg-[#d4fb65] transition-colors no-underline"
+          >
+            Get Started
+            <svg className="ml-2 w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+            </svg>
+          </a>
+          <a 
+            href="/architecture" 
+            className="inline-flex items-center justify-center px-6 py-3 text-base font-semibold rounded-lg border border-white/30 bg-white/10 text-white hover:bg-white/20 hover:border-white/50 transition-colors no-underline backdrop-blur-sm"
+          >
+            Architecture
+          </a>
+        </div>
+      </div>
+      <div className="hidden lg:block lg:col-span-5 relative">
+        <div className="relative">
+          <div className="absolute inset-0 bg-gradient-to-tr from-[#d0f03c]/20 to-[#d4fb65]/20 rounded-2xl blur-3xl"></div>
+          <div className="relative bg-[#1a142a]/50 dark:bg-[#0f0818]/50 backdrop-blur-sm rounded-2xl p-6 border border-white/10">
+            <div className="space-y-3">
+              <div className="flex items-center gap-3">
+                <div className="w-3 h-3 rounded-full bg-[#d0f03c]"></div>
+                <div className="h-2 bg-white/20 rounded flex-1"></div>
+              </div>
+              <div className="flex items-center gap-3 pl-6">
+                <div className="w-3 h-3 rounded-full bg-[#d4fb65]"></div>
+                <div className="h-2 bg-white/20 rounded flex-1 max-w-[70%]"></div>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="w-3 h-3 rounded-full bg-[#d0f03c]"></div>
+                <div className="h-2 bg-white/20 rounded flex-1 max-w-[85%]"></div>
+              </div>
+              <div className="pl-6 pt-2">
+                <div className="bg-[#1b0f2e] rounded-lg p-4 border border-[#d0f03c]/30">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-xs font-mono text-[#d0f03c]">document.pdf</span>
+                    <span className="text-xs text-gray-400">2.4 MB</span>
+                  </div>
+                  <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
+                    <div className="h-full w-3/4 bg-gradient-to-r from-[#d0f03c] to-[#d4fb65] rounded-full"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <div className="mb-12">
+    <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900 dark:text-white mb-3">
+      Quick Start
+    </h2>
+    <p className="text-base text-gray-600 dark:text-gray-400">
+      Get the Document Download Frontend running locally in minutes
+    </p>
+  </div>
+
+  <Steps>
+    <Step title="Install dependencies">
+      First, install Python dependencies using `uv` and Node.js dependencies:
+      
+      ```bash
+      # Install uv (Python package manager)
+      curl -LsSf https://astral.sh/uv/install.sh | sh
+      
+      # Bootstrap the application
+      make bootstrap
+      ```
+      
+      This installs all Python and Node.js dependencies and builds frontend assets.
+    </Step>
+    
+    <Step title="Configure environment">
+      Set up required environment variables:
+      
+      ```bash
+      export NOTIFY_ENVIRONMENT=development
+      export API_HOST_NAME=http://localhost:6011
+      export DOCUMENT_DOWNLOAD_API_HOST_NAME=http://localhost:7000
+      export SECRET_KEY=dev-notify-secret-key
+      export ADMIN_CLIENT_SECRET=dev-notify-secret-key
+      ```
+      
+      <Note>
+        These are development defaults. See [Environment Variables](/configuration/environment-variables) for production configuration.
+      </Note>
+    </Step>
+    
+    <Step title="Run the application">
+      Start the Flask development server:
+      
+      ```bash
+      make run-flask
+      ```
+      
+      The application will be available at `http://localhost:7001`.
+      
+      <Tip>
+        To automatically rebuild frontend assets on changes, run `npm run watch` in a separate terminal.
+      </Tip>
+    </Step>
+    
+    <Step title="Test your setup">
+      Verify the application is running by accessing the health check endpoint:
+      
+      ```bash
+      curl http://localhost:7001/_status
+      ```
+      
+      Expected response:
+      ```json
+      {
+        "status": "ok"
+      }
+      ```
+    </Step>
+  </Steps>
+</div>
+
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <div className="mb-8">
+    <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900 dark:text-white mb-3">
+      Key Features
+    </h2>
+    <p className="text-base text-gray-600 dark:text-gray-400">
+      Purpose-built for secure document delivery in government services
+    </p>
+  </div>
+
+  <CardGroup cols={2}>
+    <Card title="Secure Downloads" icon="shield-check" href="/application/routes">
+      Encrypted document delivery with key-based authentication and expiry controls
+    </Card>
+    <Card title="Email Verification" icon="envelope-circle-check" href="/application/forms">
+      Optional email confirmation to ensure documents reach the intended recipient
+    </Card>
+    <Card title="GOV.UK Design System" icon="palette" href="/application/templates">
+      Built with GOV.UK Frontend components for consistency and accessibility
+    </Card>
+    <Card title="Content Security Policy" icon="lock" href="/api-reference/app-init">
+      Comprehensive CSP headers, HSTS, and security best practices built-in
+    </Card>
+    <Card title="Docker Ready" icon="docker" href="/deployment/docker">
+      Multi-stage Dockerfile optimized for production deployments
+    </Card>
+    <Card title="Health Monitoring" icon="heart-pulse" href="/application/routes">
+      Built-in health check endpoints for monitoring and orchestration
+    </Card>
+  </CardGroup>
+</div>
+
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <div className="mb-8">
+    <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900 dark:text-white mb-3">
+      Explore the Documentation
+    </h2>
+    <p className="text-base text-gray-600 dark:text-gray-400">
+      Everything you need to deploy, configure, and maintain the service
+    </p>
+  </div>
+
+  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <a href="/getting-started/installation" className="group block rounded-2xl border border-gray-200 dark:border-[#27272a] hover:border-[#040404] dark:hover:border-[#d0f03c] overflow-hidden no-underline transition-colors">
+      <div className="p-6">
+        <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-2 group-hover:text-[#040404] dark:group-hover:text-[#d0f03c] transition-colors">
+          Getting Started Guide
+        </h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+          Complete setup instructions for development and production environments
+        </p>
+        <div className="flex items-center text-sm font-medium text-[#040404] dark:text-[#d0f03c]">
+          <span>Read the guide</span>
+          <svg className="ml-1 w-4 h-4 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </div>
+    </a>
+
+    <a href="/configuration/environment-variables" className="group block rounded-2xl border border-gray-200 dark:border-[#27272a] hover:border-[#040404] dark:hover:border-[#d0f03c] overflow-hidden no-underline transition-colors">
+      <div className="p-6">
+        <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-2 group-hover:text-[#040404] dark:group-hover:text-[#d0f03c] transition-colors">
+          Configuration Reference
+        </h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+          Environment variables and settings for all deployment scenarios
+        </p>
+        <div className="flex items-center text-sm font-medium text-[#040404] dark:text-[#d0f03c]">
+          <span>View configuration</span>
+          <svg className="ml-1 w-4 h-4 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </div>
+    </a>
+
+    <a href="/application/routes" className="group block rounded-2xl border border-gray-200 dark:border-[#27272a] hover:border-[#040404] dark:hover:border-[#d0f03c] overflow-hidden no-underline transition-colors">
+      <div className="p-6">
+        <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-2 group-hover:text-[#040404] dark:group-hover:text-[#d0f03c] transition-colors">
+          Application Routes
+        </h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+          Document landing, email verification, and download endpoints
+        </p>
+        <div className="flex items-center text-sm font-medium text-[#040404] dark:text-[#d0f03c]">
+          <span>Explore routes</span>
+          <svg className="ml-1 w-4 h-4 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </div>
+    </a>
+
+    <a href="/api-reference/views" className="group block rounded-2xl border border-gray-200 dark:border-[#27272a] hover:border-[#040404] dark:hover:border-[#d0f03c] overflow-hidden no-underline transition-colors">
+      <div className="p-6">
+        <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-2 group-hover:text-[#040404] dark:group-hover:text-[#d0f03c] transition-colors">
+          API Reference
+        </h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+          Core modules, view functions, and configuration options
+        </p>
+        <div className="flex items-center text-sm font-medium text-[#040404] dark:text-[#d0f03c]">
+          <span>View API docs</span>
+          <svg className="ml-1 w-4 h-4 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </div>
+    </a>
+  </div>
+</div>
+
+<div className="mt-20 mb-16 max-w-5xl mx-auto px-6">
+  <div className="rounded-2xl bg-gradient-to-br from-[#1a142a] to-[#33183b] dark:from-[#0f0818] dark:to-[#1a142a] p-8 sm:p-12 border border-[#d0f03c]/20">
+    <div className="max-w-2xl">
+      <h2 className="text-2xl sm:text-3xl font-semibold text-white mb-4">
+        Ready to deploy?
+      </h2>
+      <p className="text-base text-gray-300 dark:text-gray-400 mb-6">
+        Learn how to deploy Document Download Frontend to production with Docker, environment configuration, and security best practices.
+      </p>
+      <a 
+        href="/deployment/docker" 
+        className="inline-flex items-center justify-center px-6 py-3 text-base font-semibold rounded-lg bg-[#d0f03c] text-[#1b0f2e] hover:bg-[#d4fb65] transition-colors no-underline"
+      >
+        Deployment Guide
+        <svg className="ml-2 w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+        </svg>
+      </a>
+    </div>
+  </div>
+</div>

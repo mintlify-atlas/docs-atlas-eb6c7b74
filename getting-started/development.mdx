@@ -1,0 +1,198 @@
+---
+title: Development Setup
+description: Bootstrap the development environment and install project dependencies
+---
+
+After installing the [required prerequisites](/getting-started/installation), you need to bootstrap the project to install all dependencies and build the frontend assets.
+
+## Bootstrap the Project
+
+The project provides a `make bootstrap` command that handles all initial setup.
+
+<Steps>
+  <Step title="Ensure you're using the correct Node.js version">
+    ```bash
+    nvm use
+    ```
+  </Step>
+
+  <Step title="Run the bootstrap command">
+    ```bash
+    make bootstrap
+    ```
+    
+    This command will:
+    - Generate a version file with the current git commit and timestamp
+    - Install Python dependencies from `requirements_for_test.txt` using uv
+    - Install Node.js dependencies using `npm ci --no-audit`
+    - Rebuild node-sass binaries for your platform
+    - Build frontend assets (JavaScript, CSS, images, fonts)
+  </Step>
+</Steps>
+
+## What Gets Installed
+
+### Python Dependencies
+
+The bootstrap process installs all Python packages specified in `requirements_for_test.txt`, including:
+
+- Flask and related extensions
+- GOV.UK Frontend Jinja templates
+- Notify utilities and client libraries
+- Testing frameworks (pytest, etc.)
+- Linting tools (ruff)
+- AWS SDK (boto3) for S3 operations
+- Sentry SDK for error tracking
+
+### Node.js Dependencies
+
+The `npm ci` command installs:
+
+- GOV.UK Frontend (v6.0.0) for styles and components
+- Rollup and plugins for bundling JavaScript
+- Sass for compiling stylesheets
+- ESLint and Stylelint for code quality
+
+### Frontend Build Output
+
+The build process generates:
+
+- Compiled JavaScript bundles
+- Compiled CSS from SCSS files
+- GOV.UK Frontend assets (fonts, images)
+- Static assets copied to the appropriate directories
+
+## Project Structure
+
+After bootstrapping, your project structure includes:
+
+```
+document-download-frontend/
+├── app/                    # Application code
+│   ├── templates/         # Jinja templates
+│   ├── static/            # Static assets (built)
+│   └── version.py         # Generated version file
+├── tests/                 # Test suite
+├── application.py         # Flask application entry point
+├── requirements.txt       # Python dependencies
+├── package.json           # Node.js dependencies
+└── Makefile              # Build automation
+```
+
+## Updating Dependencies
+
+### Python Dependencies
+
+The project uses a two-file approach for Python dependencies:
+
+<Steps>
+  <Step title="Edit requirements.in">
+    Add or update package versions in `requirements.in`
+  </Step>
+
+  <Step title="Freeze requirements">
+    ```bash
+    make freeze-requirements
+    ```
+    
+    This will:
+    - Compile `requirements.in` to `requirements.txt` with pinned versions
+    - Compile `requirements_for_test.in` to `requirements_for_test.txt`
+    - Sync the virtual environment with the new requirements
+  </Step>
+</Steps>
+
+### Node.js Dependencies
+
+<Steps>
+  <Step title="Update package.json">
+    Edit version numbers in `package.json`
+  </Step>
+
+  <Step title="Install updated dependencies">
+    ```bash
+    npm install
+    ```
+  </Step>
+
+  <Step title="Rebuild frontend assets">
+    ```bash
+    npm run build
+    ```
+  </Step>
+</Steps>
+
+### Updating GOV.UK Frontend
+
+<Warning>
+When updating GOV.UK Frontend, you must keep versions synchronized between Python and Node.js dependencies.
+</Warning>
+
+The project has GOV.UK Frontend as a dependency in two places:
+
+1. **Python**: `govuk-frontend-jinja` in `requirements.in` for Jinja templates
+2. **Node.js**: `govuk-frontend` in `package.json` for fonts, images, and Sass files
+
+Ensure the version of `govuk-frontend` that `govuk-frontend-jinja` relies on matches the version in `package.json`. Check the [govuk-frontend-jinja compatibility table](https://github.com/LandRegistry/govuk-frontend-jinja#compatibility).
+
+### Updating notifications-utils
+
+To update the `notifications-utils` package:
+
+```bash
+make bump-utils
+```
+
+This will automatically update to the latest version.
+
+## Troubleshooting
+
+### node-sass rebuild fails
+
+If `npm rebuild node-sass` fails during bootstrap:
+
+```bash
+# Clear npm cache
+npm cache clean --force
+
+# Remove node_modules and reinstall
+rm -rf node_modules
+npm ci --no-audit
+npm rebuild node-sass
+```
+
+### uv pip install fails
+
+Ensure you're using the latest version of uv:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+### Version file not generated
+
+The version file requires git to be available:
+
+```bash
+# Check git is installed
+git --version
+
+# Ensure you're in a git repository
+git status
+```
+
+### Pre-commit hooks fail
+
+If pre-commit hooks are not running:
+
+```bash
+# Reinstall hooks
+pre-commit install --install-hooks
+
+# Run hooks manually
+pre-commit run --all-files
+```
+
+<Note>
+Once the development environment is set up, proceed to [Running Locally](/getting-started/running-locally) to start the application.
+</Note>

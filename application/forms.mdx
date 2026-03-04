@@ -1,0 +1,375 @@
+---
+title: Forms and Validation
+description: WTForms classes and email validation for document downloads
+---
+
+## Overview
+
+The Document Download Frontend uses **Flask-WTF** and **WTForms** for form handling and validation. Form validation leverages the `notifications-utils` library for consistent email validation across GOV.UK Notify services.
+
+**File:** `app/forms.py`
+
+## Email Address Form
+
+### EmailAddressForm Class
+
+**Purpose:** Validate email addresses before allowing document downloads
+
+**Inherits:** `FlaskForm` (aliased as `Form`)
+
+**Usage:** Email confirmation page (`/confirm-email-address`)
+
+```python
+from flask_wtf import FlaskForm as Form
+from wtforms import StringField
+from wtforms.validators import DataRequired
+
+class EmailAddressForm(Form):
+    email_address = EmailAddressField(
+        "Email address",
+        validators=[DataRequired("Enter your email address"), ValidEmail()],
+        filters=[strip_all_whitespace],
+    )
+```
+
+**Field:** `email_address`
+- **Type:** `EmailAddressField` (custom field)
+- **Label:** `"Email address"`
+- **Validators:**
+  - `DataRequired("Enter your email address")` - Ensures field not empty
+  - `ValidEmail()` - Custom email validation
+- **Filters:**
+  - `strip_all_whitespace` - Removes all whitespace from input
+
+### Form Usage in Views
+
+**Route:** `confirm_email_address()` (`index.py:102`)
+
+```python
+form = EmailAddressForm()
+
+if form.validate_on_submit():
+    try:
+        authentication_data = _authenticate_access_to_document(
+            service_id, document_id, key, form.email_address.data
+        )
+    except TooManyRequests:
+        return (
+            render_template("error/429.html", go_back_link=request.url, page_name="confirm your email address"),
+            429,
+        )
+
+    if authentication_data:
+        # Set cookie and redirect to download
+        response = redirect(url_for(".download_document", service_id=service_id, document_id=document_id, key=key))
+        response.set_cookie(**set_cookie_values)
+        return response
+
+    # Authentication failed - email doesn't match
+    form.form_errors.append(
+        Markup(
+            "This is not the email address the file was sent to.<br><br>"
+            f"To confirm the file was meant for you, enter the email address {service_name} sent the file to."
+        )
+    )
+```
+
+**Validation Flow:**
+1. Form instantiated on GET request
+2. User submits email address
+3. `validate_on_submit()` checks CSRF token and runs validators
+4. If valid, authenticate with backend API
+5. On auth failure, append custom error to `form.form_errors`
+
+## Custom Field: EmailAddressField
+
+### Field Definition
+
+```python
+from wtforms import StringField
+from flask import render_template
+from markupsafe import Markup
+
+class EmailAddressField(StringField):
+    def widget(self, field, **kwargs):
+        if field.errors:
+            error_message = {"text": field.errors[0]}
+        else:
+            error_message = None
+
+        params = {
+            "id": self.id,
+            "name": self.name,
+            "type": "email",
+            "errorMessage": error_message,
+            "label": {
+                "text": "Email address",
+                "for": self.id,
+            },
+            "spellcheck": False,
+            "autocomplete": "email",
+            "value": field.data,
+        }
+        return Markup(render_template("components/govuk_input.html", params=params))
+```
+
+**Purpose:** Render GOV.UK Design System compliant email input
+
+**Key Features:**
+- **Error handling:** Passes first error to `errorMessage` parameter
+- **Input type:** Uses `type="email"` for browser validation hints
+- **Autocomplete:** Sets `autocomplete="email"` for browser autofill
+- **Spellcheck:** Disables spellcheck (inappropriate for email addresses)
+- **GOV.UK component:** Renders via `govuk_input.html` template
+
+**Rendered Template:**
+```html
+<!-- components/govuk_input.html -->
+{%- from "govuk_frontend_jinja/components/input/macro.html" import govukInput -%}
+{{ govukInput(params) }}
+```
+
+## Custom Validator: ValidEmail
+
+### Validator Class
+
+```python
+from notifications_utils.recipient_validation.email_address import validate_email_address
+from notifications_utils.recipient_validation.errors import InvalidEmailError
+from wtforms import ValidationError
+
+class ValidEmail:
+    message = "Not a valid email address"
+
+    def __call__(self, form, field):
+        if not field.data:
+            return
+
+        try:
+            validate_email_address(field.data)
+        except InvalidEmailError as e:
+            raise ValidationError(self.message) from e
+```
+
+**Purpose:** Validate email addresses using Notify's standard validation rules
+
+**Behavior:**
+1. Skip validation if field empty (handled by `DataRequired`)
+2. Call `validate_email_address()` from `notifications-utils`
+3. Raise WTForms `ValidationError` if email invalid
+
+**Validation Rules (from notifications-utils):**
+- Valid email format (RFC 5322)
+- No consecutive dots
+- Valid TLD
+- Maximum length checks
+- Character restrictions
+
+### Error Messages
+
+**Default validator error:**
+```
+Not a valid email address
+```
+
+**Empty field error:**
+```
+Enter your email address
+```
+
+**Authentication failure error:**
+```html
+This is not the email address the file was sent to.<br><br>
+To confirm the file was meant for you, enter the email address {service_name} sent the file to.
+```
+
+## Form Filters
+
+### strip_all_whitespace
+
+**Source:** `notifications_utils.formatters`
+
+**Purpose:** Remove all whitespace characters from email input
+
+**Applied to:** `email_address` field
+
+**Example:**
+```python
+# Input:  "  user@example.com  "
+# Output: "user@example.com"
+
+# Input:  "user @example. com"
+# Output: "user@example.com"
+```
+
+Prevents common copy-paste errors where whitespace is inadvertently included.
+
+## CSRF Protection
+
+### CSRF Token
+
+Flask-WTF automatically adds CSRF protection to all forms.
+
+**In template:**
+```html
+<form method="post" novalidate>
+  {{ form.csrf_token }}
+  {{ form.email_address }}
+  <!-- ... -->
+</form>
+```
+
+**Rendered output:**
+```html
+<input id="csrf_token" name="csrf_token" type="hidden" value="ImY3ZjU...">
+```
+
+**Validation:** Automatically checked by `validate_on_submit()`
+
+**Error handling:** CSRF errors handled by Flask-WTF error handler
+
+## Form Error Handling
+
+### Field Errors
+
+Validator errors attached to specific fields:
+
+```python
+form.email_address.errors  # List of error messages
+```
+
+**Template access:**
+```html
+{% if form.email_address.errors %}
+  <span class="govuk-error-message">
+    {{ form.email_address.errors[0] }}
+  </span>
+{% endif %}
+```
+
+### Form-Level Errors
+
+Custom errors not tied to specific fields:
+
+```python
+form.form_errors.append(
+    Markup(
+        "This is not the email address the file was sent to.<br><br>"
+        f"To confirm the file was meant for you, enter the email address {service_name} sent the file to."
+    )
+)
+```
+
+**Template rendering:**
+```html
+{%- from "macros/error_summary.html" import render_error_summary -%}
+{{ render_error_summary(form) }}
+```
+
+Displays GOV.UK error summary component at top of page.
+
+## Status Codes
+
+**Form display (GET):**
+- `200` - Form rendered successfully
+
+**Form submission (POST):**
+- `200` - Validation passed, redirecting to download
+- `400` - Validation errors (re-render form)
+- `429` - Rate limit exceeded (too many authentication attempts)
+
+**In view code:**
+```python
+return (
+    render_template(
+        "views/confirm-email-address.html",
+        form=form,
+        # ... other variables
+    ),
+    400 if form.errors else 200,
+)
+```
+
+## Integration with GOV.UK Design System
+
+### Error Summary Component
+
+Displays all errors at top of page:
+
+```html
+<div class="govuk-error-summary" aria-labelledby="error-summary-title" role="alert" tabindex="-1" data-module="govuk-error-summary">
+  <h2 class="govuk-error-summary__title" id="error-summary-title">
+    There is a problem
+  </h2>
+  <div class="govuk-error-summary__body">
+    <ul class="govuk-error-summary__list">
+      <li>
+        <a href="#email_address">Enter your email address</a>
+      </li>
+    </ul>
+  </div>
+</div>
+```
+
+### Input Component
+
+Email field rendered with GOV.UK input component:
+
+```html
+<div class="govuk-form-group govuk-form-group--error">
+  <label class="govuk-label" for="email_address">
+    Email address
+  </label>
+  <span id="email_address-error" class="govuk-error-message">
+    <span class="govuk-visually-hidden">Error:</span> Not a valid email address
+  </span>
+  <input class="govuk-input govuk-input--error" id="email_address" name="email_address" type="email" value="invalid@" autocomplete="email" spellcheck="false">
+</div>
+```
+
+## Testing Considerations
+
+### Valid Email Examples
+
+```python
+# Valid
+"user@example.com"
+"test.user@example.co.uk"
+"user+tag@example.com"
+
+# Invalid
+"not-an-email"
+"@example.com"
+"user@"
+"user..name@example.com"  # Consecutive dots
+```
+
+### Whitespace Handling
+
+```python
+# All normalized to "user@example.com"
+"  user@example.com  "
+"user @example.com"
+"user@ example.com"
+"u s e r @ e x a m p l e . c o m"
+```
+
+## Dependencies
+
+**Required packages:**
+- `Flask-WTF` - Flask integration for WTForms
+- `WTForms` - Form library
+- `notifications-utils` - Notify-specific validation and formatting
+- `MarkupSafe` - Safe HTML rendering for error messages
+
+**Imports:**
+```python
+from flask_wtf import FlaskForm as Form
+from wtforms import StringField, ValidationError
+from wtforms.validators import DataRequired
+from notifications_utils.formatters import strip_all_whitespace
+from notifications_utils.recipient_validation.email_address import validate_email_address
+from notifications_utils.recipient_validation.errors import InvalidEmailError
+from markupsafe import Markup
+from flask import render_template
+```

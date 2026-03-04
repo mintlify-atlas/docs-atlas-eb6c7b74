@@ -1,0 +1,185 @@
+---
+title: Frontend Assets
+description: Building and watching JavaScript and SCSS assets with Rollup
+---
+
+## Overview
+
+The project uses Rollup to bundle JavaScript modules and compile SCSS stylesheets. Assets are built from `app/assets/` and output to `app/static/`.
+
+## Quick Start
+
+### Build Assets Once
+
+```bash
+npm run build
+```
+
+### Watch for Changes
+
+```bash
+npm run watch
+```
+
+This rebuilds assets automatically when source files change.
+
+## Build Configuration
+
+Rollup configuration is defined in `rollup.config.mjs` with two build targets:
+
+### 1. JavaScript Build
+
+**Input:** `app/assets/javascripts/main.mjs`  
+**Output:** `app/static/javascripts/main.js`
+
+Features:
+- ES module compilation
+- Module resolution with `@rollup/plugin-node-resolve`
+- Minification with `@rollup/plugin-terser`
+- Source maps enabled
+
+### 2. SCSS Build
+
+**Input:** `app/assets/stylesheets/main.scss`  
+**Output:** `app/static/stylesheets/main.css`
+
+Features:
+- Sass compilation
+- CSS minification
+- Source maps enabled
+- Include paths:
+  - `node_modules/govuk-frontend/dist/govuk/`
+  - `node_modules/`
+
+## Static Asset Copying
+
+The build process copies static assets to `app/static/`:
+
+- **Images:** `app/assets/images/**/*` → `app/static/images/`
+- **GOV.UK Frontend Images:** → `app/static/images/`
+- **GOV.UK Frontend Fonts:** → `app/static/fonts/`
+- **Manifest:** `govuk-frontend` manifest → `app/static/`
+
+## Directory Structure
+
+```
+app/
+├── assets/                 # Source files
+│   ├── javascripts/
+│   │   └── main.mjs
+│   ├── stylesheets/
+│   │   └── main.scss
+│   └── images/
+└── static/                 # Built files (generated)
+    ├── javascripts/
+    │   ├── main.js
+    │   └── main.js.map
+    ├── stylesheets/
+    │   ├── main.css
+    │   └── main.css.map
+    ├── images/
+    ├── fonts/
+    └── manifest.json
+```
+
+## Dependencies
+
+### Production
+
+- **govuk-frontend** 6.0.0 - GOV.UK Design System components and styles
+
+### Development
+
+- **rollup** - Module bundler
+- **@rollup/plugin-node-resolve** - Resolve node_modules imports
+- **@rollup/plugin-terser** - JavaScript minification
+- **rollup-plugin-copy** - Copy static assets
+- **rollup-plugin-styler** - SCSS compilation
+- **sass** - Sass compiler
+
+## Bootstrap
+
+Initial setup including installing dependencies and building assets:
+
+```bash
+make bootstrap
+```
+
+This runs:
+1. Generate version file
+2. Install Python dependencies from `requirements_for_test.txt`
+3. `npm ci --no-audit` - Install npm dependencies
+4. `npm rebuild node-sass` - Rebuild native dependencies
+5. `npm run build` - Build frontend assets
+
+## Sass Configuration
+
+The Sass compiler is configured with:
+
+- **Include paths:** Access to GOV.UK Frontend and node_modules
+- **Deprecation silencing:** Suppresses warnings for:
+  - `mixed-decls`
+  - `global-builtin`
+  - `color-functions`
+  - `slash-div`
+  - `import`
+
+## Development Workflow
+
+1. **Start watch mode:**
+   ```bash
+   npm run watch
+   ```
+
+2. **Make changes** to files in `app/assets/`
+
+3. **Assets rebuild automatically** to `app/static/`
+
+4. **Refresh browser** to see changes (or use live reload if configured)
+
+## Production Build
+
+For production deployment:
+
+```bash
+npm run build
+```
+
+This creates optimized, minified assets with source maps for debugging.
+
+## Troubleshooting
+
+### Assets not updating
+
+If assets don't update after changes:
+
+1. Check that watch mode is running
+2. Verify file paths in `rollup.config.mjs`
+3. Clear browser cache
+4. Restart the watch process
+
+### Build errors
+
+If you encounter build errors:
+
+```bash
+# Reinstall dependencies
+rm -rf node_modules package-lock.json
+npm ci
+
+# Rebuild native modules
+npm rebuild
+
+# Try building again
+npm run build
+```
+
+### Missing GOV.UK Frontend assets
+
+Ensure GOV.UK Frontend is installed:
+
+```bash
+npm ci
+```
+
+The build process will copy assets from `node_modules/govuk-frontend/`.

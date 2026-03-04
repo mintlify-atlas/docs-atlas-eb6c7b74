@@ -1,0 +1,221 @@
+---
+title: "Application Initialization"
+description: "Core application initialization module with security, configuration, and routing setup"
+---
+
+The `app/__init__.py` module provides the foundational setup for the Document Download Frontend application, including Flask app initialization, security headers, CSRF protection, and custom URL converters.
+
+## Main Functions
+
+### create_app
+
+Initializes the Flask application with configuration, blueprints, and middleware.
+
+<ParamField path="application" type="Flask">
+  Flask application instance to configure
+</ParamField>
+
+```python
+from flask import Flask
+from app import create_app
+
+app = Flask(__name__)
+create_app(app)
+```
+
+**Initialization Steps:**
+1. Loads configuration from `NOTIFY_ENVIRONMENT` environment variable
+2. Registers `Base64UUIDConverter` for URL routing
+3. Initializes metrics, Jinja templates, StatsD client, and logging
+4. Registers main blueprint with routes
+5. Sets up error handlers
+
+### init_app
+
+Configures request lifecycle hooks and template context.
+
+<ParamField path="application" type="Flask">
+  Flask application instance
+</ParamField>
+
+**Registers:**
+- `after_request`: Adds security headers via `useful_headers_after_request`
+- `before_request`: Generates CSP nonce via `make_nonce_before_request`
+- `context_processor`: Injects global template variables (asset_path, header_colour, asset_url)
+
+## Security Functions
+
+### make_nonce_before_request
+
+Generates a cryptographically secure nonce for Content Security Policy.
+
+```python
+# Automatically called before each request
+# Stores nonce in request.csp_nonce for use in CSP headers
+```
+
+**Implementation:**
+- Uses `secrets.token_urlsafe(16)` for secure random generation
+- Stored in `request.csp_nonce` for template inline scripts
+
+### useful_headers_after_request
+
+Adds comprehensive security headers to every response.
+
+<ParamField path="response" type="Response">
+  Flask response object
+</ParamField>
+
+<ResponseField name="response" type="Response">
+  Modified response with security headers
+</ResponseField>
+
+```python
+# Headers automatically added:
+X-Robots-Tag: noindex, nofollow
+X-Frame-Options: DENY
+X-Content-Type-Options: nosniff
+X-Permitted-Cross-Domain-Policies: none
+Referrer-Policy: no-referrer
+Content-Security-Policy: default-src 'self'; script-src 'self' 'nonce-{csp_nonce}'; ...
+Cache-Control: no-store, no-cache, private, must-revalidate
+Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+Cross-Origin-Embedder-Policy: require-corp;
+Cross-Origin-Opener-Policy: same-origin;
+Cross-Origin-Resource-Policy: same-origin;
+Permissions-Policy: geolocation=(), microphone=(), camera=(), ...
+```
+
+## Error Handlers
+
+### register_errorhandlers
+
+Registers comprehensive error handling for HTTP errors and exceptions.
+
+<ParamField path="application" type="Flask">
+  Flask application instance
+</ParamField>
+
+**Handles:**
+- **400, 401, 403, 404, 410**: Renders corresponding error template
+- **500, Exception**: Logs exception, shows debug stacktrace in DEBUG mode
+- **CSRFError**: Logs CSRF attempt, renders 500 template with 400 status
+- **EventletTimeout**: Logs timeout, returns 504 error
+
+```python
+# Error template rendering
+render_template(f"error/{error_code}.html"), error_code
+```
+
+## URL Converters
+
+### Base64UUIDConverter
+
+Custom Werkzeug converter for base64-encoded UUIDs in URLs.
+
+#### to_python
+
+Converts base64 URL parameter to UUID.
+
+<ParamField path="value" type="str">
+  Base64-encoded UUID from URL
+</ParamField>
+
+<ResponseField name="uuid" type="UUID">
+  Decoded UUID object
+</ResponseField>
+
+**Raises:** `ValidationError` if value cannot be decoded
+
+#### to_url
+
+Converts UUID to base64 string for URL generation.
+
+<ParamField path="value" type="UUID">
+  UUID object to encode
+</ParamField>
+
+<ResponseField name="base64" type="str">
+  Base64-encoded UUID string
+</ResponseField>
+
+```python
+# Usage in routes:
+@main.route("/d/<base64_uuid:service_id>/<base64_uuid:document_id>")
+def landing(service_id, document_id):
+    # service_id and document_id are automatically converted to UUID objects
+    pass
+```
+
+## Client Initialization
+
+### service_api_client
+
+Thread-safe proxy to ServiceApiClient instance.
+
+```python
+from app import service_api_client
+
+# Use in view functions
+service = service_api_client.get_service(service_id)
+```
+
+**Implementation:**
+- Uses `ContextVar` for thread-local storage
+- Lazy initialization via `LazyLocalGetter`
+- Proxied through `LocalProxy` for transparent access
+
+### reset_memos
+
+Resets all memoized/cached client instances.
+
+```python
+from app import reset_memos
+
+reset_memos()  # Clears all thread-local client instances
+```
+
+## Template Configuration
+
+### init_jinja
+
+Configures Jinja2 template loader with application and GOV.UK Frontend templates.
+
+<ParamField path="application" type="Flask">
+  Flask application instance
+</ParamField>
+
+**Template Locations:**
+- `app/templates`: Application-specific templates
+- `govuk_frontend_jinja`: GOV.UK Design System components
+
+```python
+# Template usage:
+{% extends "govuk_frontend_jinja/template.html" %}
+```
+
+## Metrics and Monitoring
+
+### metrics
+
+GDSMetrics instance for application performance monitoring.
+
+```python
+from app import metrics
+
+# Automatically tracks request timing and reliability
+```
+
+### statsd_client
+
+StatsdClient for custom metrics collection.
+
+```python
+from app import statsd_client
+
+# Available for custom metric tracking
+```
+
+## Configuration Reference
+
+See [Configuration Classes](/api-reference/config) for detailed environment variable setup.
